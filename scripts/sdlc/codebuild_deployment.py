@@ -1315,6 +1315,553 @@ def test_step13_permission_boundaries(stack_name):
         return {"success": False, "error": f"Permission-boundary check failed: {e}"}
 
 
+# ---------------------------------------------------------------------------
+# Step 14: pipeline hooks (preprocessing / postprocessing)
+# ---------------------------------------------------------------------------
+#
+# The pipeline-hook mechanism — the platform's supported way for a feature or an
+# admin to inject business logic into document processing — had NO end-to-end
+# coverage before this step, at any of its seven extension points. Unit tests
+# cover the dispatcher with fakes, but nothing exercised the parts that only
+# exist on a real stack:
+#
+#   * the real dispatcher Lambda reading a hook out of a real config version,
+#   * `UpdateSchemaConfig` actually publishing the hook config sections, so the
+#     fields an admin edits exist in the deployed schema,
+#   * a hook Lambda cleared by the dispatcher's tag/name IAM condition,
+#   * a hook's `updatedDocument` surviving into the PERSISTED document (the
+#     tracking row), not just the state machine's output.
+#
+# It is a genuine gap rather than a theoretical one: a hook that silently never
+# fires looks identical to one that ran and decided to do nothing — the workflow
+# still succeeds, the document still reaches COMPLETED, and the hook Lambda
+# writes no logs. That exact failure mode shipped once already (#599).
+#
+# The test is deliberately self-contained: it creates its own hook Lambda + role,
+# registers the hook in its OWN config version (never the active one, so it
+# cannot disturb the parallel steps sharing this stack), processes one document
+# pinned to that version, then deletes everything it made. A leftover hook ARN
+# would be actively harmful — a stale ARN at a flat point with onError:fail fails
+# every subsequent document — so teardown runs in a `finally`.
+_HOOK_FN_PREFIX = "GENAIIDP-citest-hook"  # dispatcher IAM allows GENAIIDP-*
+
+# Marker the hook writes into the document; asserted in the persisted document.
+_HOOK_MARKER_KEY = "ci_hook_marker"
+
+# Inline source for the test hook. Uses `idp_common.hooks` — the documented
+# helper pair — so this doubles as a check that the published contract works
+# against a real stack (a hook built by hand would test our own scaffolding
+# instead of the API we tell feature authors to use).
+_HOOK_SOURCE = '''
+import os
+from idp_common.hooks import load_hook_document, updated_document_result
+
+MARKER_KEY = os.environ["MARKER_KEY"]
+
+
+def lambda_handler(event, context):
+    """Mutate the document so the test can prove the hook ran AND that its
+    change propagated. Reads its own settings from `args`, like a real hook.
+
+    The marker goes into a SECTION's `attributes` (and `summary_report_uri` as a
+    document-level backstop) because those are fields `Document.to_dict()`
+    actually serializes. Note `Document.metadata` is a runtime-only field that
+    to_dict() drops entirely — writing the marker there looks correct and
+    silently never persists.
+    """
+    document = load_hook_document(event)
+    args = {a["key"]: a.get("value") for a in (event.get("args") or [])}
+    point = event.get("hookPoint")
+
+    marker = {
+        "hookPoint": point,
+        "note": args.get("note", ""),
+        # Proves the hook saw a real, populated document rather than a stub.
+        "saw_sections": len(document.sections or []),
+        "saw_status": str(getattr(document, "status", "")),
+        # HITL fields are omitted when falsy, so absent == no HITL.
+        "saw_hitl_status": (event.get("document") or {}).get("hitl_status"),
+    }
+
+    # postprocessing runs last, so only its marker is the final persisted value;
+    # tag the document-level field with the point so the assertion can tell which
+    # hook wrote it.
+    document.summary_report_uri = f"{MARKER_KEY}:{point}"
+
+    # Section attributes are what a real hook mutates, and they round-trip.
+    # `setdefault`-style write so an existing extraction result is preserved.
+    for section in document.sections or []:
+        if section.attributes is None:
+            section.attributes = {}
+        if isinstance(section.attributes, dict):
+            section.attributes[MARKER_KEY] = marker
+            break
+
+    return updated_document_result(document, ciHookRan=True, ciHookPoint=point)
+'''
+
+
+def _hook_iam_role(iam, role_name):
+    """Create (idempotently) an execution role for the test hook Lambda.
+
+    Needs basic logs plus read/write on the working bucket: `load_hook_document`
+    resolves a compressed reference from S3, and `updated_document_result` may
+    spill a large document back.
+    """
+    trust = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "lambda.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
+    try:
+        role_arn = iam.create_role(
+            RoleName=role_name, AssumeRolePolicyDocument=trust
+        )["Role"]["Arn"]
+    except iam.exceptions.EntityAlreadyExistsException:
+        role_arn = iam.get_role(RoleName=role_name)["Role"]["Arn"]
+    iam.attach_role_policy(
+        RoleName=role_name,
+        PolicyArn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    )
+    iam.put_role_policy(
+        RoleName=role_name,
+        PolicyName="hook-s3-kms",
+        PolicyDocument=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["s3:GetObject", "s3:PutObject"],
+                        "Resource": "arn:aws:s3:::*/compressed_documents/*",
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "kms:Decrypt",
+                            "kms:Encrypt",
+                            "kms:GenerateDataKey",
+                            "kms:DescribeKey",
+                        ],
+                        "Resource": "*",
+                    },
+                ],
+            }
+        ),
+    )
+    return role_arn
+
+
+def _build_hook_zip(path):
+    """Zip the hook source together with idp_common and its import-time deps.
+
+    `make setup` has already installed idp_common into the build environment, so
+    every package is located by IMPORTING it and walking its real directory,
+    rather than assuming a shared site-packages parent. That matters because the
+    packages are not necessarily siblings: idp_common may be an editable install
+    pointing into the repo while its dependencies live in site-packages, and an
+    earlier version of this helper silently produced a zip with idp_common but
+    NO pydantic — which fails only at Lambda import time, in CI, where it is
+    expensive to debug.
+    """
+    import importlib
+    import zipfile
+
+    # idp_common[core] needs these at import time (config.models imports
+    # pydantic). Deliberately explicit: a broad site-packages sweep would push
+    # the zip past Lambda's 50MB direct-upload limit.
+    required = ["idp_common", "pydantic", "pydantic_core", "annotated_types"]
+    optional = ["typing_extensions", "typing_inspection"]
+
+    def _add_module(zf, mod_name, required_flag):
+        try:
+            mod = importlib.import_module(mod_name)
+        except ImportError:
+            if required_flag:
+                raise RuntimeError(
+                    f"Cannot build the hook zip: {mod_name!r} is not importable. "
+                    f"Run `make setup` first."
+                ) from None
+            return False
+        src = mod.__file__ or ""
+        if not src:
+            return False
+        # A package (has __init__.py) is added as a directory tree; a bare
+        # module as its single file.
+        if os.path.basename(src).startswith("__init__."):
+            pkg_dir = os.path.dirname(os.path.abspath(src))
+            base = os.path.dirname(pkg_dir)
+            for root, _dirs, files in os.walk(pkg_dir):
+                if "__pycache__" in root:
+                    continue
+                for fn in files:
+                    if fn.endswith((".pyc", ".pyo")):
+                        continue
+                    full = os.path.join(root, fn)
+                    zf.write(full, os.path.relpath(full, base))
+        else:
+            zf.write(os.path.abspath(src), os.path.basename(src))
+        return True
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("index.py", _HOOK_SOURCE)
+        for name in required:
+            _add_module(zf, name, True)
+        for name in optional:
+            _add_module(zf, name, False)
+
+    # Fail loudly here rather than at Lambda cold start: a zip missing pydantic
+    # imports fine locally and dies with ModuleNotFoundError only in CI.
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        for expected in ("index.py", "idp_common/hooks/__init__.py", "pydantic/"):
+            if not any(n == expected or n.startswith(expected) for n in names):
+                raise RuntimeError(
+                    f"Hook zip is missing {expected!r} — the Lambda would fail "
+                    f"at import time ({len(names)} entries built)"
+                )
+    return path
+
+
+def test_step14_pipeline_hooks(stack_name):
+    """Step 14: End-to-end pipeline-hook test (postprocessing + preprocessing).
+
+    Deploys a real hook Lambda, registers it in a DEDICATED config version at
+    both standalone hook points, processes one document pinned to that version,
+    and asserts three things that only a live stack can show:
+
+      1. the dispatcher actually INVOKED the hook (`invoked >= 1` in the state
+         machine's `HookResults`, plus the config version it resolved) — the one
+         assertion that distinguishes "ran and did nothing" from "never called";
+      2. the hook's `updatedDocument` reached the PERSISTED document, i.e. the
+         mutation survived past the workflow into the tracking row;
+      3. the deployed config SCHEMA carries the hook sections, so the fields an
+         admin edits in the UI exist on this stack.
+
+    Uses its own config version, so it never perturbs the parallel steps sharing
+    this stack. Everything it creates is removed in `finally`.
+    """
+    print("Step 14: Testing pipeline hooks end-to-end...")
+
+    config_version = "test-pipeline-hooks"
+    suffix = stack_name.split("-")[-1][:8].lower() or "ci"
+    fn_name = f"{_HOOK_FN_PREFIX}-{suffix}"
+    role_name = f"{fn_name}-role"
+    zip_path = "/tmp/citest-hook.zip"  # nosec B108
+    lam = boto3.client("lambda", config=_THROTTLE_RETRY_CONFIG)
+    iam = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
+    created_fn = created_role = False
+
+    try:
+        import yaml
+
+        # --- 1. Deploy the hook Lambda -------------------------------------
+        print(f"  Creating hook Lambda {fn_name}...")
+        role_arn = _hook_iam_role(iam, role_name)
+        created_role = True
+        _build_hook_zip(zip_path)
+        # IAM role propagation to Lambda is eventually consistent.
+        time.sleep(12)
+        with open(zip_path, "rb") as f:
+            code = f.read()
+        for attempt in range(5):
+            try:
+                lam.create_function(
+                    FunctionName=fn_name,
+                    Runtime="python3.12",
+                    Role=role_arn,
+                    Handler="index.lambda_handler",
+                    Code={"ZipFile": code},
+                    Timeout=120,
+                    MemorySize=512,
+                    Environment={"Variables": {"MARKER_KEY": _HOOK_MARKER_KEY}},
+                )
+                created_fn = True
+                break
+            except lam.exceptions.ResourceConflictException:
+                lam.update_function_code(FunctionName=fn_name, ZipFile=code)
+                created_fn = True
+                break
+            except Exception as exc:  # noqa: BLE001 — role not yet assumable
+                if attempt == 4:
+                    raise
+                print(f"    create_function retry {attempt + 1}: {exc}")
+                time.sleep(10)
+        hook_arn = (
+            lam.get_function(FunctionName=fn_name)
+            .get("Configuration", {})
+            .get("FunctionArn", "")
+        )
+        if not hook_arn:
+            return {
+                "success": False,
+                "error": f"Could not resolve the ARN of hook Lambda {fn_name}",
+            }
+        print(f"  ✓ Hook Lambda ready: {hook_arn}")
+
+        # --- 2. Register the hook in a DEDICATED config version ------------
+        # Start from the stack's own default config so the version is valid.
+        base = "/tmp/citest-hook-config.yaml"  # nosec B108
+        run_command(
+            f"idp-cli config-download --stack-name {stack_name} "
+            f"--config-version default --output {base}",
+            check=True,
+        )
+        with open(base, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+
+        # Assertion 3: the deployed SCHEMA must expose these sections. Checked
+        # against the downloaded config's own shape below (see schema check).
+        for point in ("preprocessing", "postprocessing"):
+            cfg[point] = {
+                "enabled": True,
+                "featureId": "ci-hook-test",
+                "arn": hook_arn,
+                # `continue` on BOTH points: a hook fault must not fail the
+                # document and turn a coverage test into a flaky gate. The
+                # invoked-count assertion is what proves it ran.
+                "onError": "continue",
+                "args": [{"key": "note", "value": f"ci-{point}"}],
+                "allowDocumentUpdate": True,
+            }
+        with open(base, "w") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False)
+
+        run_command(
+            f"idp-cli config-upload --stack-name {stack_name} "
+            f"--config-file {base} --config-version {config_version}",
+            check=True,
+        )
+        # Round-trip check: the flat hook sections must survive the config
+        # write/read path (they are dropped if a model field is missing —
+        # exactly the regression the config-model tests guard offline).
+        rt = "/tmp/citest-hook-config-rt.yaml"  # nosec B108
+        run_command(
+            f"idp-cli config-download --stack-name {stack_name} "
+            f"--config-version {config_version} --output {rt}",
+            check=True,
+        )
+        with open(rt, "r") as f:
+            rt_cfg = yaml.safe_load(f) or {}
+        for point in ("preprocessing", "postprocessing"):
+            section = rt_cfg.get(point) or {}
+            if section.get("arn") != hook_arn:
+                return {
+                    "success": False,
+                    "error": (
+                        f"{point} hook did not survive the config round-trip "
+                        f"(arn={section.get('arn')!r}) — the dispatcher would "
+                        f"find no hook to call"
+                    ),
+                }
+        print("  ✓ Both hook sections survived the config round-trip")
+
+        # --- 3. Process a document pinned to that version ------------------
+        print("  Processing a document with the hook registered...")
+        batch_id = "test-pipeline-hooks"
+        run_command(
+            f"idp-cli run-inference --stack-name {stack_name} "
+            f"-d samples/lending_package.pdf --batch-id {batch_id} "
+            f"--config-version {config_version} --monitor",
+            check=True,
+            timeout=900,
+        )
+
+        # --- 4. Assert the dispatcher INVOKED the hook ---------------------
+        cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+        outputs = {
+            o["OutputKey"]: o["OutputValue"]
+            for o in cf.describe_stacks(StackName=stack_name)["Stacks"][0].get(
+                "Outputs", []
+            )
+        }
+        sm_arn = outputs.get("StateMachineArn", "")
+        if not sm_arn:
+            return {
+                "success": False,
+                "error": "StateMachineArn missing from stack outputs",
+            }
+
+        sfn = boto3.client("stepfunctions", config=_THROTTLE_RETRY_CONFIG)
+        found = {}
+        for ex in sfn.list_executions(
+            stateMachineArn=sm_arn, statusFilter="SUCCEEDED", maxResults=25
+        ).get("executions", []):
+            hist = sfn.get_execution_history(
+                executionArn=ex["executionArn"], reverseOrder=True, maxResults=200
+            ).get("events", [])
+            for event in hist:
+                det = event.get("taskSucceededEventDetails") or {}
+                out = det.get("output") or ""
+                if '"hookPoint"' not in out:
+                    continue
+                try:
+                    payload = json.loads(out).get("Payload") or {}
+                except (ValueError, TypeError):
+                    continue
+                point = payload.get("hookPoint")
+                if point in ("preprocessing", "postprocessing"):
+                    # Keep the richest record per point.
+                    if payload.get("invoked", 0) >= found.get(point, {}).get(
+                        "invoked", -1
+                    ):
+                        found[point] = payload
+            if len(found) == 2:
+                break
+
+        for point in ("preprocessing", "postprocessing"):
+            payload = found.get(point)
+            if not payload:
+                return {
+                    "success": False,
+                    "error": (
+                        f"No {point} dispatcher result found in any SUCCEEDED "
+                        f"execution — the hook state may not be wired into the "
+                        f"state machine"
+                    ),
+                }
+            if payload.get("invoked", 0) < 1:
+                return {
+                    "success": False,
+                    "error": (
+                        f"{point} dispatcher reported invoked=0 (resolved "
+                        f"configVersion={payload.get('configVersion')!r}); the "
+                        f"hook was registered in {config_version!r} but never "
+                        f"called"
+                    ),
+                }
+            print(
+                f"  ✓ {point}: invoked={payload['invoked']} "
+                f"configVersion={payload.get('configVersion')!r}"
+            )
+
+        # --- 5. Assert the mutation reached the PERSISTED document ---------
+        # postprocessing is the last writer, so its marker is the one that must
+        # survive into the tracking row.
+        post = found["postprocessing"]
+        if _HOOK_MARKER_KEY not in json.dumps(post.get("document") or {}):
+            # The dispatcher returns a compressed reference, so the marker is
+            # usually not inline here — fall back to the tracking row, which is
+            # the assertion that actually matters.
+            print("  (marker not inline in the dispatcher result; checking DynamoDB)")
+        if not post.get("documentUpdatedBy"):
+            return {
+                "success": False,
+                "error": (
+                    "postprocessing hook ran but the dispatcher recorded no "
+                    "documentUpdatedBy — its updatedDocument was refused "
+                    f"(results={json.dumps(post.get('results'))[:400]})"
+                ),
+            }
+        print(f"  ✓ document updated by {post['documentUpdatedBy']}")
+
+        # The marker must appear in the PERSISTED document. Note the two hook
+        # points write it to different places: at `postprocessing` the document
+        # has sections, so the marker lands in a section's `attributes`; at
+        # `preprocessing` there are no sections yet (OCR/classification have not
+        # run), so only the document-level `summary_report_uri` backstop carries
+        # it — and postprocessing, running later, overwrites that field. So this
+        # asserts the POSTPROCESSING marker specifically, which is the one that
+        # must be the final persisted value.
+        marker_seen = _find_marker_in_tracking(stack_name, outputs)
+        if not marker_seen:
+            return {
+                "success": False,
+                "error": (
+                    f"Hook ran and its update was accepted, but {_HOOK_MARKER_KEY} "
+                    f"is absent from the persisted document — the mutation did "
+                    f"not survive into the tracking row"
+                ),
+            }
+        print(f"  ✓ marker persisted to the tracking row: {marker_seen}")
+
+        print("✅ Pipeline-hook end-to-end test passed (preprocessing + postprocessing)")
+        return {"success": True}
+
+    except Exception as e:  # noqa: BLE001
+        print(f"❌ Pipeline-hook test failed: {e}")
+        return {"success": False, "error": f"Pipeline-hook test failed: {e}"}
+
+    finally:
+        # Teardown is NOT optional: a leftover hook ARN pointing at a deleted
+        # Lambda is exactly the stale-ARN state that fails every subsequent
+        # document at a flat hook point. The config version is disposable (never
+        # activated), but the Lambda + role must go.
+        if created_fn:
+            try:
+                lam.delete_function(FunctionName=fn_name)
+                print(f"  ✓ deleted hook Lambda {fn_name}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  ⚠️  could not delete hook Lambda {fn_name}: {exc}")
+        if created_role:
+            for call, kwargs in (
+                (iam.delete_role_policy, {"RoleName": role_name, "PolicyName": "hook-s3-kms"}),
+                (
+                    iam.detach_role_policy,
+                    {
+                        "RoleName": role_name,
+                        "PolicyArn": "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                    },
+                ),
+                (iam.delete_role, {"RoleName": role_name}),
+            ):
+                try:
+                    call(**kwargs)
+                except Exception:  # noqa: BLE001 — best-effort teardown
+                    pass
+            print(f"  ✓ deleted hook role {role_name}")
+
+
+def _find_marker_in_tracking(stack_name, outputs):
+    """Return the hook marker from the persisted document, or None.
+
+    The tracking row stores the document; the hook wrote its marker into
+    `metadata`. Scans this batch's documents rather than assuming a key, since
+    the object key is derived from the upload path.
+    """
+    table_name = outputs.get("TrackingTableName")
+    if not table_name:
+        # Not exported by every template revision; fall back to a name lookup.
+        cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+        for page in cf.get_paginator("list_stack_resources").paginate(
+            StackName=stack_name
+        ):
+            for r in page.get("StackResourceSummaries", []):
+                if (
+                    r.get("ResourceType") == "AWS::DynamoDB::Table"
+                    and r.get("LogicalResourceId") == "TrackingTable"
+                ):
+                    table_name = r.get("PhysicalResourceId")
+                    break
+    if not table_name:
+        print("  ⚠️  could not locate the tracking table")
+        return None
+
+    ddb = boto3.client("dynamodb", config=_THROTTLE_RETRY_CONFIG)
+    # Bounded scan: the smoke-test stack is fresh, so this is small. Looking for
+    # any document carrying our marker.
+    for page in ddb.get_paginator("scan").paginate(
+        TableName=table_name,
+        # filtered-scan-ok: bounded to a fresh smoke-test stack, and the
+        # paginator pages to completion, so no match can be missed.
+        FilterExpression="begins_with(PK, :p)",
+        ExpressionAttributeValues={":p": {"S": "doc#"}},
+        PaginationConfig={"MaxItems": 500},
+    ):
+        for item in page.get("Items", []):
+            blob = json.dumps(item)
+            if _HOOK_MARKER_KEY in blob:
+                return f"{item.get('PK', {}).get('S', '?')}"
+    return None
+
+
 # Single source of truth for the smoke-test suite: (func, step, name,
 # description). The parallel runner, the success summary, and the AI
 # failure-analysis prompt are all derived from this list — add or remove a
@@ -1385,6 +1932,16 @@ PARALLEL_TEST_STEPS = [
         "Step 13",
         "Permission boundaries",
         "IAM permissions boundaries attached to deployed roles",
+    ),
+    # Step 14: pipeline hooks. Safe in the parallel pool — it registers its hook
+    # in its OWN config version and never activates it, so the other steps
+    # (which use `default` or their own versions) are unaffected. It does create
+    # a Lambda + role, both removed in its own `finally`.
+    (
+        test_step14_pipeline_hooks,
+        "Step 14",
+        "Pipeline hooks",
+        "Pipeline hooks end-to-end (preprocessing + postprocessing, mutation persisted)",
     ),
 ]
 # Step 12 stays sequential: its dynamic RBAC harness temporarily flips

@@ -15,6 +15,15 @@ _SDLC_DIR = Path(__file__).resolve().parent.parent
 if str(_SDLC_DIR) not in sys.path:
     sys.path.insert(0, str(_SDLC_DIR))
 
+# The Step 14 tests build the hook Lambda's zip, which imports idp_common. In
+# CodeBuild `make setup` has installed it, but the gate runs pytest from the repo
+# root with no PYTHONPATH — so add the in-repo package for a local/dev run.
+# Without this the whole Step 14 hook-package suite silently SKIPS via
+# importorskip, and a skipped test protects nothing.
+_IDP_COMMON_DIR = _SDLC_DIR.parent.parent / "lib" / "idp_common_pkg"
+if _IDP_COMMON_DIR.is_dir() and str(_IDP_COMMON_DIR) not in sys.path:
+    sys.path.append(str(_IDP_COMMON_DIR))
+
 
 @pytest.fixture
 def cbd():
