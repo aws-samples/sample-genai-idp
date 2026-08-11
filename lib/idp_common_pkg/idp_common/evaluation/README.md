@@ -101,6 +101,18 @@ because either would let the estimator certify an inaccurate set:
 
 Either sets `estimateConfidence="unreliable"` and `recommendReviewAll=True`.
 
+**Quality tiers.** `quality_tier()` derives a `QualityTier` (`gold` / `silver` /
+`bronze` / `unrated`) from the estimated accuracy *and* how it was obtained: 99%
+computed from a cross-set prior says nothing about these labels, so only a curve
+measured on this set can earn `gold`. An unreliable curve is `unrated` rather than
+graded, since no accuracy claim is defensible when confidence cannot rank
+correctness.
+
+The tier is deliberately a derived value, not a settable field — it must be
+earnable and losable rather than assertable. Note that the UI leads with the
+estimated accuracy and treats the tier name as shorthand: "gold data" carries a
+specific connotation for customers, and a badge alone reads as a certification.
+
 The effort model is a flat heuristic (fields × per-field seconds + sections ×
 per-section seconds), measured from the test set where possible. It does not model
 field complexity or annotator speed; per-annotator timings from claim→complete

@@ -695,7 +695,7 @@ that curve it derives:
 
 | Output | Meaning |
 |---|---|
-| **Documents to review** | Fewest lowest-confidence documents that reach the target |
+| **Documents to review** | Fewest documents that reach the target, taken in confidence-alert order |
 | **Implied cutoff** | The confidence value at the boundary of that set |
 | **Residual error** | Expected error remaining after that review |
 | **Effort** | Estimated review time, including the audit sample below |
@@ -803,13 +803,22 @@ The queue page shows:
 
 - **Team progress** — reviewed / total for the whole set, shared across everyone
   working it, plus how many documents are currently claimed by other people.
-- **Review queue** — the documents, worst-confidence first. Each card shows the
-  document's lowest field confidence and its label source. A document claimed by
-  someone else is greyed out and names who has it.
+- **Review queue** — the documents ordered by **confidence alerts**: the number of
+  fields scoring below their configured threshold, most first, with the lowest
+  field confidence breaking ties. This matches how human review has always ranked
+  work in the Document List — a field below its threshold needs a human whether it
+  missed by 2 points or 40 — and it reflects the actual effort in a document,
+  which a single lowest score does not. Each card also shows the label source. A
+  document claimed by someone else is greyed out and names who has it.
 - **The ground-truth editor** — the same editor used everywhere else in Test
-  Studio, with the page images, per-field confidence, and the JSON tab.
+  Studio, with the page images, per-field confidence, the JSON tab, and the
+  revision history.
 - **Save & next in queue** — saves the correction, marks the document reviewed,
   and moves to the next available document.
+
+Per-document actions (claim, release, skip, mark reviewed) sit at the top of the
+editor pane, so finishing a long document does not mean scrolling past every field
+to reach them.
 
 On large sets the queue is read a page at a time, and the page says so rather than
 implying the whole set has been ranked.
@@ -841,6 +850,61 @@ least trustworthy thing in the set, not the most.
 
 Not yet supported: explicit per-annotator assignment, multi-reviewer agreement
 and adjudication, and review time-boxes.
+
+### Correcting a misclassified document
+
+Draft labeling runs the whole configuration, so a multi-class set is labeled by
+whatever class the pipeline decided each document was. When that decision is
+wrong, correcting it is two steps rather than one: the class *and* the fields
+underneath it, which were extracted against the wrong schema.
+
+In the editor, **Class label** is a dropdown of the classes defined by the config
+version that produced these labels — not the deployment's currently active
+configuration, which may have moved on since. Choosing a different class offers
+**Change class & re-extract**, which re-runs that one document and waits for the
+new labels before returning, so you are never left looking at fields from the
+previous class.
+
+Two consequences worth knowing:
+
+- **Re-extraction replaces this document's labels**, including confirmed ones.
+  Asking to re-extract after correcting the class is a statement that the current
+  labels are wrong, so they stop counting as reviewed. Everything else in the set
+  is untouched.
+- **A class the configuration does not define stays selectable** if the document
+  already carries it, so a class that was later renamed can still be seen and
+  corrected rather than silently blanked.
+
+Annotators can do this within their assigned sets; the operation is scope-checked
+per test set like every other annotation operation.
+
+### Revision history
+
+Each label records who changed it, when, and which fields moved. Open a document
+and use the **Revision History** tab — the same tab, and the same view, as the
+document detail editor in the main app.
+
+Confirming labels with no edits is recorded too: the sign-off is itself the
+auditable event. The history lives inside the label, so it travels with a published
+version.
+
+This covers "who approved these labels and when". Multi-stage approval chains
+(preparer / reviewer / approver with separate sign-offs) are not implemented.
+
+### Clearing draft labels
+
+Re-labeling with a corrected configuration is the normal loop while tuning one, but
+a re-run only *replaces* a draft where the new run produces a section for it. A run
+that splits a document differently therefore leaves the previous sections behind,
+and because a document's confidence is the minimum across its sections, one stale
+section keeps the document reading low after the real problem is fixed.
+
+**Clear draft labels** (Admin/Author, on the test set's document list) deletes every
+machine draft in the set and leaves the documents in place, ready to re-label.
+
+Only labels tagged `draft-machine` are removed. Reviewed labels, and any ground
+truth that was uploaded or generated, are kept — a configuration retry must never
+be able to discard the team's annotation work.
 
 ### Upload Methods
 1. **UI Zip Upload**: S3 event → Lambda extraction → Validation → Status update
