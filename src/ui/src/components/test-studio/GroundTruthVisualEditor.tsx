@@ -20,6 +20,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Alert,
+  Badge,
   Box,
   Button,
   FormField,
@@ -41,7 +42,9 @@ import { getConfigClassOptions } from '../common/config-class-options';
 import PageImageViewer from '../common/PageImageViewer';
 import FormFieldRenderer from '../document-viewer/FormFieldRenderer';
 import JSONEditorTab from '../document-viewer/JSONEditorTab';
+import EditHistoryTab from '../document-viewer/EditHistoryTab';
 import useTestDocPages from '../../hooks/use-test-doc-pages';
+import { renderLabelSource } from './TestSetDetail';
 
 const client = generateClient();
 const logger = new ConsoleLogger('GroundTruthVisualEditor');
@@ -237,6 +240,7 @@ const GroundTruthVisualEditor = ({
     return [{ label: documentClassType, value: documentClassType, description: 'Not defined in this config version' }, ...classOptions];
   }, [classOptions, documentClassType]);
   const classChanged = Boolean(savedClassType) && documentClassType !== savedClassType;
+  const editHistoryCount = Array.isArray(localData?._editHistory) ? (localData._editHistory as unknown[]).length : 0;
 
   const updateInferenceResult = (newValue: Record<string, unknown>) => {
     if (isReadOnly || !localData) return;
@@ -319,9 +323,28 @@ const GroundTruthVisualEditor = ({
     setIsSaving(true);
     setError(null);
     try {
-      // Append an edit-history entry (same provenance convention as
-      // VisualEditorModal) so GT edits are auditable in the file itself.
       const dataToSave: Record<string, unknown> = { ...localData };
+      const fullPath = selectedSection.baselineKey;
+
+      // Caller-supplied persistence (the annotation workspace routes through the
+      // review API so the save claims, tags and teaches the confidence curve).
+      //
+      // No client-side _editHistory entry on this path: completeSectionReview
+      // writes one server-side, with the reviewer identity from the Cognito token
+      // and a field-level diff against the label being replaced. Appending here
+      // too would double-record every review, and with the weaker of the two
+      // entries — client-asserted identity and no diff.
+      if (onSave) {
+        await onSave(selectedSection.sectionId, dataToSave);
+        setLocalData(dataToSave);
+        setOriginalJson(JSON.stringify(dataToSave, null, 2));
+        logger.info('Saved ground truth via caller-supplied handler for', fullPath);
+        if (onSaved) onSaved(fullPath);
+        return;
+      }
+
+      // Direct-to-S3 path: nothing server-side records provenance here, so the
+      // editor writes its own entry (same convention as VisualEditorModal).
       const editHistory = (dataToSave._editHistory as unknown[]) || [];
       editHistory.push({
         timestamp: new Date().toISOString(),
@@ -330,19 +353,6 @@ const GroundTruthVisualEditor = ({
       });
       dataToSave._editHistory = editHistory;
       const editedContent = JSON.stringify(dataToSave, null, 2);
-
-      const fullPath = selectedSection.baselineKey;
-
-      // Caller-supplied persistence (the annotation workspace routes through the
-      // review API so the save claims, tags and teaches the confidence curve).
-      if (onSave) {
-        await onSave(selectedSection.sectionId, dataToSave);
-        setLocalData(dataToSave);
-        setOriginalJson(editedContent);
-        logger.info('Saved ground truth via caller-supplied handler for', fullPath);
-        if (onSaved) onSaved(fullPath);
-        return;
-      }
 
       const fileName = fullPath.split('/').pop() ?? fullPath;
       const prefix = fullPath.substring(0, fullPath.lastIndexOf('/'));
@@ -428,6 +438,21 @@ const GroundTruthVisualEditor = ({
       >
         Ground truth — {objectKey}
       </Header>
+
+      {/* Everything we tag a label with, visible where the label is edited —
+          Bob's ask. Provenance is the trust axis of the whole review loop, so a
+          machine draft must never be mistaken on screen for confirmed work. */}
+      {localData && (
+        <SpaceBetween direction="horizontal" size="xs">
+          {renderLabelSource(localData.labelSource as string | undefined)}
+          {baselineConfigVersion !== 'default' && <Badge color="grey">Config: {baselineConfigVersion}</Badge>}
+          {editHistoryCount > 0 && (
+            <Box fontSize="body-s" color="text-body-secondary">
+              {editHistoryCount} revision{editHistoryCount === 1 ? '' : 's'} — see Revision History
+            </Box>
+          )}
+        </SpaceBetween>
+      )}
 
       {sections.length > 1 && (
         <SegmentedControl
@@ -596,6 +621,15 @@ const GroundTruthVisualEditor = ({
                       loadingEvaluation={false}
                     />
                   ),
+                },
+                {
+                  id: 'history',
+                  // Same tab, same component, same place as the document-detail
+                  // editor. Asked for by Bob; Spencer's use is spotting a field the
+                  // team keeps correcting, which points at a configuration gap
+                  // rather than at the annotators.
+                  label: 'Revision History',
+                  content: <EditHistoryTab predictionData={localData} baselineData={null} />,
                 },
               ]}
             />

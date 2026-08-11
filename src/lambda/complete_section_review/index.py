@@ -178,7 +178,9 @@ def complete_section_review(
         # Test-set HITL: if this doc belongs to a test set, also write the
         # corrected labels back to the test set's baseline so a later
         # publishTestSetVersion captures the human annotation as ground truth.
-        write_correction_to_test_set_baseline(object_key, section_id, edited_data)
+        write_correction_to_test_set_baseline(
+            object_key, section_id, edited_data, username, user_email
+        )
 
     # Get current pending and completed sections from document model
     pending = set(document.hitl_sections_pending or [])
@@ -298,7 +300,9 @@ def save_edited_data_to_s3(s3_uri, edited_data):
         raise
 
 
-def write_correction_to_test_set_baseline(object_key, section_id, edited_data):
+def write_correction_to_test_set_baseline(
+    object_key, section_id, edited_data, username="", user_email=""
+):
     """Persist a HITL correction to the owning test set's baseline (ground truth).
 
     A test-set review document is keyed ``{test_run_id}/{filename}`` and carries
@@ -335,6 +339,10 @@ def write_correction_to_test_set_baseline(object_key, section_id, edited_data):
         # (the harvester only replaces labels tagged draft-machine).
         if isinstance(data, dict):
             data["labelSource"] = "reviewed-human"
+            # Carry the provenance the ground-truth viewer reads. Without this the
+            # only record of the review lives in DynamoDB, where the viewer cannot
+            # reach it.
+            append_edit_history(previous, data, username, user_email)
 
         s3_client.put_object(
             Bucket=TEST_SET_BUCKET,
@@ -352,6 +360,79 @@ def write_correction_to_test_set_baseline(object_key, section_id, edited_data):
         logger.error(
             f"Failed to write correction to test-set baseline for {object_key}: {e}"
         )
+
+
+# A label reviewed many times must not grow without bound; the most recent
+# entries are the ones anyone reads.
+MAX_EDIT_HISTORY_ENTRIES = 50
+
+
+def append_edit_history(previous, saved, username, user_email):
+    """Record who changed what, in the label itself.
+
+    The reviewer's identity was already captured — in DynamoDB, as
+    HITLReviewHistory — but the ground-truth viewer reads provenance from
+    ``_editHistory`` inside the JSON, which only the direct-to-S3 editor path
+    wrote. So an annotation saved through this Lambda left no visible trail at
+    all: the audit data existed where nothing could show it.
+
+    The field-level diff is computed against the label being replaced, which is
+    already in hand for the curve observation, so this costs no extra read. Bob
+    asked for the trail; Spencer's use for it is spotting a field the whole team
+    keeps correcting, which is evidence of a configuration gap rather than of bad
+    annotators — that only works if the diffs are here.
+    """
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "editedBy": username or "unknown",
+        "editedByEmail": user_email or "",
+        "source": "annotation-review",
+    }
+    diffs = _field_diffs(previous, saved)
+    if diffs:
+        entry["baselineEdits"] = {
+            "changedFields": list(diffs.keys()),
+            "changeCount": len(diffs),
+            "diffs": diffs,
+        }
+
+    # Seeded from the label being replaced, not from the incoming edit. The
+    # client sends the section body it wants stored, and a client that does not
+    # round-trip _editHistory would silently erase every prior reviewer's entry —
+    # the trail belongs to the server. Prefer whichever copy is longer so a client
+    # that DOES send it back cannot truncate the record either.
+    stored = (previous or {}).get("_editHistory")
+    incoming = saved.get("_editHistory")
+    history = stored if isinstance(stored, list) else []
+    if isinstance(incoming, list) and len(incoming) > len(history):
+        history = incoming
+    saved["_editHistory"] = [*history, entry][-MAX_EDIT_HISTORY_ENTRIES:]
+
+
+def _field_diffs(previous, saved):
+    """Field path → {originalValue, newValue} for every value the review changed.
+
+    Shares the flattening the curve uses, so "changed" means the same thing to
+    the audit trail and to the calibration signal.
+    """
+    if not previous:
+        return {}
+    try:
+        from idp_common.evaluation.curve_store import _flatten_values
+
+        before = _flatten_values(previous.get("inference_result") or {})
+        after = _flatten_values(saved.get("inference_result") or {})
+    except Exception as e:  # noqa: BLE001 — provenance must not fail the save
+        logger.warning(f"Could not diff review changes: {e}")
+        return {}
+
+    diffs = {}
+    for path in set(before) | set(after):
+        original = before.get(path)
+        new = after.get(path)
+        if original != new:
+            diffs[path] = {"originalValue": original, "newValue": new}
+    return diffs
 
 
 def _read_json(bucket, key):

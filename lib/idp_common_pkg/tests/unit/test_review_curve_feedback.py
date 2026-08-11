@@ -238,6 +238,146 @@ class TestCurveFeedback:
         assert CurveStore(table).get_curve("ts1").total_observations == 0
 
 
+class TestRevisionHistory:
+    """The audit trail has to land where the viewer can read it.
+
+    Reviewer identity was already recorded in DynamoDB as HITLReviewHistory, but
+    the ground-truth viewer renders provenance from ``_editHistory`` inside the
+    label JSON — so a review saved through this Lambda left no visible trail.
+    """
+
+    def test_review_records_who_changed_what_in_the_label(self, review_env):
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        module.write_correction_to_test_set_baseline(
+            "run1/a.pdf",
+            "1",
+            json.dumps({"inference_result": {"vendor": "Acme", "total": "142.50"}}),
+            "annotator1",
+            "annotator1@example.com",
+        )
+
+        stored = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        history = stored["_editHistory"]
+        assert len(history) == 1
+        entry = history[0]
+        assert entry["editedBy"] == "annotator1"
+        assert entry["editedByEmail"] == "annotator1@example.com"
+        assert entry["source"] == "annotation-review"
+        # The diff is what makes the trail useful: Spencer's case is spotting a
+        # field the team keeps correcting, which points at a config gap.
+        diffs = entry["baselineEdits"]["diffs"]
+        assert diffs["total"] == {"originalValue": "100", "newValue": "142.50"}
+        assert "vendor" not in diffs, "an untouched field is not a change"
+
+    def test_history_accumulates_across_reviews(self, review_env):
+        """A second reviewer's edit must not erase the first one's."""
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        module.write_correction_to_test_set_baseline(
+            "run1/a.pdf",
+            "1",
+            json.dumps({"inference_result": {"vendor": "Acme", "total": "142.50"}}),
+            "first",
+        )
+        module.write_correction_to_test_set_baseline(
+            "run1/a.pdf",
+            "1",
+            json.dumps({"inference_result": {"vendor": "Acme Inc", "total": "142.50"}}),
+            "second",
+        )
+
+        stored = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert [e["editedBy"] for e in stored["_editHistory"]] == ["first", "second"]
+
+    def test_a_client_that_drops_history_cannot_erase_it(self, review_env):
+        """The trail belongs to the server, not to whatever the client posts.
+
+        Found by test: the entry was originally appended to the *incoming* body, so
+        any client that did not round-trip _editHistory silently wiped every prior
+        reviewer's record — the exact failure an audit trail exists to prevent.
+        """
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+        # A label with existing history, as it sits in S3.
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {**DRAFTED_LABEL, "_editHistory": [{"editedBy": "earlier-reviewer"}]}
+            ).encode(),
+        )
+
+        # The client posts only the fields, with no history at all.
+        module.write_correction_to_test_set_baseline(
+            "run1/a.pdf",
+            "1",
+            json.dumps({"inference_result": {"vendor": "Acme", "total": "9"}}),
+            "later-reviewer",
+        )
+
+        stored = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert [e["editedBy"] for e in stored["_editHistory"]] == [
+            "earlier-reviewer",
+            "later-reviewer",
+        ]
+
+    def test_history_is_capped(self, review_env):
+        """A label reviewed many times must not grow without bound."""
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        saved = {"inference_result": {"vendor": "Acme"}}
+        saved["_editHistory"] = [
+            {"editedBy": f"old{i}"} for i in range(module.MAX_EDIT_HISTORY_ENTRIES + 10)
+        ]
+        module.append_edit_history(DRAFTED_LABEL, saved, "newest", "")
+
+        assert len(saved["_editHistory"]) == module.MAX_EDIT_HISTORY_ENTRIES
+        # The most recent entries are the ones anyone reads, so the cap drops the
+        # oldest rather than refusing the newest.
+        assert saved["_editHistory"][-1]["editedBy"] == "newest"
+
+    def test_a_review_that_changed_nothing_still_records_the_signoff(self, review_env):
+        """ "Labels are correct — mark reviewed" is itself the auditable event."""
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        module.write_correction_to_test_set_baseline(
+            "run1/a.pdf",
+            "1",
+            json.dumps({"inference_result": {"vendor": "Acme", "total": "100"}}),
+            "confirmer",
+        )
+
+        stored = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        entry = stored["_editHistory"][0]
+        assert entry["editedBy"] == "confirmer"
+        assert "baselineEdits" not in entry, "no diff, because nothing changed"
+
+
 class TestRecordCurveObservations:
     def test_missing_previous_is_a_no_op(self, review_env):
         module, table, _ = review_env
