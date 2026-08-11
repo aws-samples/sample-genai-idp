@@ -12,7 +12,6 @@ import {
   Table,
   Box,
   Modal,
-  Popover,
   FormField,
   Input,
   Alert,
@@ -41,6 +40,7 @@ import { getErrorMessage } from '../../utils/errorUtils';
 import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
 import GenerateSyntheticDataModal from './GenerateSyntheticDataModal';
 import CreateTestSetWizard from './CreateTestSetWizard';
+import { renderQualityTier } from './TestSetDetail';
 import { testSetDetailHref, testSetAnnotateHref } from '../../routes/constants';
 
 const client = generateClient();
@@ -135,7 +135,7 @@ const TestSets = (): React.JSX.Element => {
    * One call per row, which is fine at this scale; if the list grows this wants a
    * batch endpoint.
    */
-  const [tiers, setTiers] = useState<Record<string, { tier: string; reason: string }>>({});
+  const [tiers, setTiers] = useState<Record<string, { tier: string; reason: string; accuracy: number | null }>>({});
 
   /**
    * Fetch each set's tier once, keyed on the label state it was computed from.
@@ -160,7 +160,13 @@ const TestSets = (): React.JSX.Element => {
           if (est?.qualityTier) {
             setTiers((prev) => ({
               ...prev,
-              [set.id]: { tier: est.qualityTier as string, reason: (est.qualityTierReason as string) || '' },
+              [set.id]: {
+                tier: est.qualityTier as string,
+                reason: (est.qualityTierReason as string) || '',
+                // The estimated accuracy is the primary signal in the column; the
+                // tier name is shorthand for it and lives in the tooltip.
+                accuracy: typeof est.baselineError === 'number' ? 1 - est.baselineError : null,
+              },
             }));
           }
         } catch (err) {
@@ -750,22 +756,11 @@ const TestSets = (): React.JSX.Element => {
     },
     {
       id: 'qualityTier',
-      header: 'Quality',
+      header: 'Est. label accuracy',
       cell: (item: TestSetItem) => {
         const entry = tiers[item.id];
         if (!entry) return <Box color="text-status-inactive">-</Box>;
-        const colors: Record<string, 'green' | 'blue' | 'grey' | 'severity-neutral'> = {
-          gold: 'green',
-          silver: 'blue',
-          bronze: 'grey',
-          unrated: 'severity-neutral',
-        };
-        const label = entry.tier.charAt(0).toUpperCase() + entry.tier.slice(1);
-        return (
-          <Popover dismissButton={false} position="top" size="medium" triggerType="custom" content={entry.reason}>
-            <Badge color={colors[entry.tier] || 'grey'}>{label}</Badge>
-          </Popover>
-        );
+        return renderQualityTier(entry.tier, entry.reason, entry.accuracy);
       },
     },
     {

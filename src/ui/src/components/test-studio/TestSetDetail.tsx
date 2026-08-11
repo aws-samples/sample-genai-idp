@@ -104,6 +104,54 @@ export const renderConfidence = (value?: number | null, threshold?: number | nul
 };
 
 /**
+ * A test set's label quality, led by the estimated accuracy.
+ *
+ * The number is the primary signal and the tier is shorthand for it, not the
+ * other way around: "gold" carries a specific connotation for customers, so a
+ * badge alone reads as a claim the accelerator has certified this data. Showing
+ * "99.2% est." with the tier and its reason in the tooltip says the same thing
+ * without overselling it.
+ *
+ * Colors are semantic and shared with the annotation workspace. Note the absence
+ * of bare `grey`, which renders near-black in Cloudscape and made "Bronze" look
+ * like the emphatic tier.
+ */
+export const QUALITY_TIER_COLORS: Record<string, 'green' | 'blue' | 'severity-neutral' | 'red'> = {
+  gold: 'green',
+  silver: 'blue',
+  bronze: 'severity-neutral',
+  unrated: 'red',
+};
+
+export const renderQualityTier = (tier?: string | null, reason?: string | null, accuracy?: number | null): React.JSX.Element => {
+  if (!tier) return <Box color="text-status-inactive">-</Box>;
+  const label = tier.charAt(0).toUpperCase() + tier.slice(1);
+  const detail = (
+    <SpaceBetween size="xxs">
+      <Box variant="span" fontWeight="bold">
+        {label}
+      </Box>
+      <Box variant="span">{reason || ''}</Box>
+    </SpaceBetween>
+  );
+  return (
+    <Popover dismissButton={false} position="top" size="medium" triggerType="custom" content={detail}>
+      <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
+        {/* Unrated means no accuracy claim is defensible, so don't print one. */}
+        {accuracy !== null && accuracy !== undefined && tier !== 'unrated' ? (
+          <Box variant="span">{(accuracy * 100).toFixed(1)}% est.</Box>
+        ) : (
+          <Box variant="span" color="text-body-secondary">
+            Not rated
+          </Box>
+        )}
+        <Badge color={QUALITY_TIER_COLORS[tier] ?? 'severity-neutral'}>{label}</Badge>
+      </SpaceBetween>
+    </Popover>
+  );
+};
+
+/**
  * How many fields need a human, as a count rather than a score.
  *
  * This is the same signal human review uses in the Document List: a field below

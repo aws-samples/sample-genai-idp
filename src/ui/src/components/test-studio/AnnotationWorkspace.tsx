@@ -42,7 +42,6 @@ import {
   Header,
   ProgressBar,
   Pagination,
-  Popover,
   SegmentedControl,
   SpaceBetween,
   Spinner,
@@ -62,7 +61,7 @@ import FileViewer from '../document-viewer/FileViewer';
 import GroundTruthVisualEditor from './GroundTruthVisualEditor';
 import type { TestSetDocumentSectionRef } from './GroundTruthVisualEditor';
 import { TEST_STUDIO_PATH, testSetDetailHref, testSetAnnotateHref } from '../../routes/constants';
-import { renderAlertCount, renderLabelSource } from './TestSetDetail';
+import { renderAlertCount, renderLabelSource, renderQualityTier } from './TestSetDetail';
 
 const client = generateClient();
 const logger = new ConsoleLogger('AnnotationWorkspace');
@@ -497,23 +496,10 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                   </div>
                   <div>
                     <Box variant="awsui-key-label">Quality</Box>
-                    {impact.qualityTier ? (
-                      <Popover
-                        dismissButton={false}
-                        position="top"
-                        size="medium"
-                        triggerType="custom"
-                        content={impact.qualityTierReason ?? ''}
-                      >
-                        <Badge color={impact.qualityTier === 'gold' ? 'green' : impact.qualityTier === 'silver' ? 'blue' : 'grey'}>
-                          {impact.qualityTier.charAt(0).toUpperCase() + impact.qualityTier.slice(1)}
-                        </Badge>
-                      </Popover>
-                    ) : (
-                      <Box fontSize="body-s" color="text-body-secondary">
-                        -
-                      </Box>
-                    )}
+                    {/* Same presentation as the Test Sets list — one vocabulary and
+                        one color map, so a set does not appear to change tier
+                        between screens. */}
+                    {renderQualityTier(impact.qualityTier, impact.qualityTierReason, 1 - impact.baselineError)}
                   </div>
                 </ColumnLayout>
               )}
