@@ -210,8 +210,33 @@ class TestStepRegistration:
         funcs = [entry[0] for entry in cbd.ALL_TEST_STEPS]
         assert cbd.test_step14_pipeline_hooks in funcs
 
-    def test_hook_function_name_clears_the_dispatcher_iam_condition(self, cbd):
-        """The dispatcher's IAM allows only `idp:feature-id`-tagged functions or
-        the `GENAIIDP-*` name prefix; the test hook relies on the latter, so the
-        prefix is load-bearing rather than cosmetic."""
-        assert cbd._HOOK_FN_PREFIX.startswith("GENAIIDP-")
+    def test_hook_resources_are_named_for_the_ci_role_scope(self, cbd):
+        """The CI CodeBuild role scopes `iam:*` to `role/idp-*` and `lambda:*` to
+        `function:idp-*`, so a `GENAIIDP-` prefixed name is AccessDenied — which
+        is exactly how this step first failed in the pipeline. The `idp-` prefix
+        is therefore load-bearing, not cosmetic."""
+        assert cbd._HOOK_FN_PREFIX.startswith("idp-")
+        assert not cbd._HOOK_FN_PREFIX.startswith("GENAIIDP-"), (
+            "GENAIIDP-* is outside the CI role's iam:*/lambda:* resource scope"
+        )
+
+    def test_hook_uses_the_tag_path_to_clear_the_dispatcher_iam_condition(self, cbd):
+        """Because the function is NOT named `GENAIIDP-*`, the dispatcher's other
+        allow path — the `idp:feature-id` ABAC tag — is the only thing
+        authorizing the invoke. A non-empty tag value is required (the policy
+        condition is StringLike '*')."""
+        assert cbd._HOOK_FEATURE_ID
+        assert isinstance(cbd._HOOK_FEATURE_ID, str)
+
+    def test_step_tags_the_function_it_creates(self, cbd):
+        """Guard the wiring itself: the step must actually apply the tag, or the
+        dispatcher fails closed with AccessDenied at every dispatch. Asserted on
+        the source because the call needs live AWS to execute."""
+        import inspect
+
+        src = inspect.getsource(cbd.test_step14_pipeline_hooks)
+        assert "tag_resource" in src, (
+            "the hook Lambda must be tagged idp:feature-id — without it the "
+            "dispatcher cannot invoke a function not named GENAIIDP-*"
+        )
+        assert "list_tags" in src, "the tag should be verified, not assumed"

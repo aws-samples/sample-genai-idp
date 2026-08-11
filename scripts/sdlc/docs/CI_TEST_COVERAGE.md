@@ -408,12 +408,23 @@ business logic into document processing — at both standalone hook points
 config version (`test-pipeline-hooks`) and never activates it, so the other steps
 sharing this stack are unaffected.
 **Implementation**: `test_step14_pipeline_hooks` in
-`scripts/sdlc/codebuild_deployment.py`. Deploys a real `GENAIIDP-citest-hook-*`
-Lambda (the `GENAIIDP-*` name clears the dispatcher's IAM condition without
-tagging) built from `idp_common.hooks` — the documented helper pair — so the test
-also exercises the contract we publish to feature authors. **Teardown runs in a
+`scripts/sdlc/codebuild_deployment.py`. Deploys a real `idp-citest-hook-*` Lambda
+built from `idp_common.hooks` — the documented helper pair — so the test also
+exercises the contract we publish to feature authors. **Teardown runs in a
 `finally` and is not optional**: a leftover hook ARN pointing at a deleted Lambda
 is the stale-ARN state that fails every subsequent document at a flat hook point.
+
+**Resource naming satisfies two IAM policies at once**, which is why it is not
+simply `GENAIIDP-*`: the CI CodeBuild role scopes `iam:*` to `role/idp-*` and
+`lambda:*` to `function:idp-*` (so a `GENAIIDP-` prefixed role or function is
+AccessDenied — the step's first pipeline failure), while the host dispatcher only
+invokes a hook that is *either* named `GENAIIDP-*` *or* carries the
+`idp:feature-id` tag. The resources are therefore named `idp-*` and the
+dispatcher is satisfied via the **tag** path. That is also the more
+representative test: tagging is how installed Feature Platform features clear the
+check, while the `GENAIIDP-*` name is the admin escape hatch. The step applies
+the tag unconditionally (not just via `create_function`, whose `Tags` are skipped
+on the reuse-an-existing-function path) and verifies it before proceeding.
 
 **Known asymmetry**: at `preprocessing` the document has no sections yet (OCR and
 classification have not run), so that point's marker can only land in the
