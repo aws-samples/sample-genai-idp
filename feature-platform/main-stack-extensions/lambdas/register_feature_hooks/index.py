@@ -3,27 +3,38 @@
 
 """AppSync resolver for registerFeatureHooks / unregisterFeatureHooks.
 
-Hooks are stored INLINE in the active config version, under each
-processing step's `postHook` list:
+Hooks are stored INLINE in the active config version. There are two shapes,
+matching what the pipeline-hooks dispatcher reads:
+
+1. POST-STEP points — a LIST under each processing step's `postHook`:
 
     Config#<active-version>
       ocr:
         postHook: [ {featureId, arn, order, onError, enabled}, … ]
       classification:    { …, postHook: [ … ] }
       extraction:        { …, postHook: [ … ] }
-      assessment:        { …, postHook: [ … ] }
       rule_validation:   { …, postHook: [ … ] }
       summarization:     { …, postHook: [ … ] }
+
+2. FLAT points (`preprocessing`, `postprocessing`) — a STANDALONE top-level
+   section that IS the single hook (no list):
+
+      preprocessing:  { enabled, featureId, arn, onError, args }
+      postprocessing: { enabled, featureId, arn, onError, args }
 
 So this resolver:
   1. Resolves the active config version (IsActive=true), or `default`
      when none is set.
-  2. For each input hook entry, removes any existing entry in the
-     corresponding step's `postHook` list with the same featureId, then
-     appends the new entry.
+  2. For a post-step point, removes any existing entry in that step's
+     `postHook` list with the same featureId, then appends the new entry.
+     For a flat point, fills in the section's `arn`/`featureId`/`onError` and
+     enables it, PRESERVING any `args` already there (a feature's config preset
+     typically ships the args and leaves the ARN blank until its stack exists).
   3. Writes the row back.
 
-Hooks contributed by other features are preserved untouched.
+Hooks contributed by other features are preserved untouched: a post-step list
+keeps other features' entries, and a flat section owned by a DIFFERENT featureId
+is left alone rather than hijacked (only one hook can own a flat point).
 """
 
 from __future__ import annotations
@@ -44,13 +55,23 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 _CONFIG_TABLE = os.environ["CONFIGURATION_TABLE"]
 
 _HOOK_POINT_TO_STEP = {
+    "preprocessing": "preprocessing",
     "postOcr": "ocr",
     "postClassification": "classification",
     "postExtraction": "extraction",
     # postAssessment removed in v0.6 (confidence folded into extraction).
     "postRuleValidation": "rule_validation",
     "postSummarization": "summarization",
+    "postprocessing": "postprocessing",
 }
+
+# Points whose config section IS the hook (single flat hook, no `postHook`
+# list). Must stay in sync with _FLAT_HOOK_POINTS in the dispatcher
+# (patterns/unified/src/pipeline_hooks_function/index.py) — note that
+# `postprocessing` is flat despite starting with "post", so membership is
+# explicit rather than derived from the point name.
+_FLAT_HOOK_POINTS = frozenset({"preprocessing", "postprocessing"})
+
 _VALID_POINTS = set(_HOOK_POINT_TO_STEP)
 _VALID_ON_ERROR = {"continue", "fail", "skip-remaining"}
 
@@ -170,9 +191,18 @@ def _replace_pack_entries(
     feature_id: str,
     new_by_step: Dict[str, List[Dict[str, Any]]],
 ) -> int:
-    """Mutate `payload` so each step's `postHook` list has THIS featureId's
-    entries replaced with the new ones; entries from other features survive.
-    Returns the total number of entries this featureId now contributes.
+    """Mutate `payload` so this featureId's hooks match `new_by_step`.
+
+    Post-step points: the step's `postHook` list has THIS featureId's entries
+    replaced with the new ones; entries from other features survive.
+
+    Flat points (`preprocessing`/`postprocessing`): the section itself is the
+    hook, so there is at most one owner. We fill in / clear this feature's
+    ownership and leave a section owned by another feature untouched — its
+    `args` (which a feature's config preset typically ships) are preserved
+    either way.
+
+    Returns the total number of hooks this featureId now contributes.
     """
     total = 0
     for point, step in _HOOK_POINT_TO_STEP.items():
@@ -181,6 +211,11 @@ def _replace_pack_entries(
         if not isinstance(block, dict):
             block = {} if block is None else {"_legacy_value": block}
             payload[step] = block
+
+        if point in _FLAT_HOOK_POINTS:
+            total += _apply_flat_hook(block, feature_id, new_entries, point)
+            continue
+
         existing = block.get("postHook") or []
         if not isinstance(existing, list):
             existing = []
@@ -192,6 +227,61 @@ def _replace_pack_entries(
         block["postHook"] = kept + new_entries
         total += len(new_entries)
     return total
+
+
+def _apply_flat_hook(
+    block: Dict[str, Any],
+    feature_id: str,
+    new_entries: List[Dict[str, Any]],
+    point: str,
+) -> int:
+    """Set or clear THIS feature's ownership of a flat single-hook section.
+
+    Registering: fills in `arn`/`featureId`/`onError` and enables the section,
+    preserving whatever `args` are already there. Refuses to overwrite a section
+    another feature owns (a flat point has exactly one hook; silently hijacking
+    it would disable that feature).
+
+    Unregistering (`new_entries` empty): clears the ARN and disables the section
+    only if THIS feature owns it. `args` are left in place so re-installing
+    restores the previous behavior.
+
+    Clearing on unregister is load-bearing, not just tidiness. A flat point's
+    hook is invoked by ARN, so an uninstalled feature's ARN left behind names a
+    Lambda that no longer exists — and the PII Anonymizer's shipped preset sets
+    `onError: fail`, which makes the dispatcher raise and the workflow land in
+    its terminal `PreprocessingHookFailed` state. That fails EVERY subsequent
+    document until an admin hand-edits the config. Disabling the section is the
+    fail-safe outcome; `args` survive so a re-install is a one-field change.
+    """
+    owner = block.get("featureId") or ""
+    if not new_entries:
+        if owner == feature_id:
+            block["enabled"] = False
+            block["arn"] = None
+            logger.info("Cleared flat hook at %s (owner %s)", point, feature_id)
+        return 0
+
+    if owner and owner != feature_id:
+        raise ValueError(
+            f"Hook point {point!r} already holds a hook owned by feature "
+            f"{owner!r}; it accepts only one hook. Remove that feature's hook "
+            f"before registering {feature_id!r} here."
+        )
+    # Only ever ONE hook per flat point — if a manifest somehow declared several,
+    # the last would silently win, so reject it rather than lose one.
+    if len(new_entries) > 1:
+        raise ValueError(
+            f"Hook point {point!r} accepts a single hook; got {len(new_entries)}"
+        )
+    entry = new_entries[0]
+    block["featureId"] = feature_id
+    block["arn"] = entry["arn"]
+    block["onError"] = entry["onError"]
+    block["enabled"] = entry["enabled"]
+    block.setdefault("args", [])
+    logger.info("Set flat hook at %s to %s (owner %s)", point, entry["arn"], feature_id)
+    return 1
 
 
 def _register(feature_id: str, hooks_in: List[Dict[str, Any]]) -> Dict[str, Any]:

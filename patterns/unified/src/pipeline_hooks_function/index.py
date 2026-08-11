@@ -5,11 +5,9 @@
 
 Invoked by the host's Step Functions workflow at each pipeline extension
 point (preprocessing, postOcr, postClassification, postExtraction,
-postRuleValidation, postSummarization). Reads the active configuration
-version from the host's ConfigurationTable and dispatches to the hook
-Lambdas listed under that section's hook-list field. The field is chosen
-by the hook point prefix: `pre*` points read `preHook`, `post*` points
-read `postHook`.
+postRuleValidation, postSummarization, postprocessing). Reads the active
+configuration version from the host's ConfigurationTable and dispatches to
+the hook Lambda(s) registered for that point.
 
 Hooks are stored *inline in the active config version* — under each
 section — so that activating a different config version atomically swaps
@@ -32,10 +30,16 @@ the hook set:
         postHook: [ ... ]
       summarization:
         postHook: [ ... ]
+      postprocessing:           # standalone section — runs LAST, after
+        enabled: true           # evaluation. Same SINGLE flat-hook shape as
+        arn: <lambda-arn>       # `preprocessing`, deliberately symmetrical.
+        onError: continue
+        args: [ { key, value }, ... ]
 
 The dispatcher's return value includes a top-level `halt` flag (true if any
-successful hook returned result.halt == true) so the workflow's post-hook
-Choice can short-circuit the execution via a stable JSONPath.
+successful hook returned result.halt == true, at a point where halting is
+meaningful — see _HALT_CAPABLE_POINTS) so the workflow's post-hook Choice can
+short-circuit the execution via a stable JSONPath.
 
 It ALSO always includes a top-level `document` — the document the next
 workflow step should consume. A hook that wants to change the document for
@@ -149,16 +153,21 @@ _REQUIRED_WRAPPER_FIELDS = ("num_pages", "status", "sections")
 
 # Map hook point -> config section under the active config version.
 #
-# The hook LIST field within that section is chosen by the hook point's
-# prefix: `pre*` points read `<section>.preHook`, `post*` points read
-# `<section>.postHook` (see _hook_list_field). This lets a `pre*` and a
-# `post*` hook coexist in the same section without colliding.
+# `preprocessing` and `postprocessing` are standalone top-level sections (NOT
+# nested under a processing step), and each holds a SINGLE FLAT hook rather than
+# a list (see _FLAT_HOOK_POINTS):
 #
-# `preprocessing` is a standalone top-level section (NOT nested under `ocr`):
-# its hook runs FIRST in the workflow, before the BDA/pipeline routing
-# decision, so it fires in both processing modes and even when OCR is
-# disabled. Semantically it operates on the source document, not on OCR
-# output, which is why it gets its own section.
+#   preprocessing  — runs FIRST, before the BDA/pipeline routing decision, so it
+#                    fires in both processing modes and even when OCR is
+#                    disabled. Operates on the source document.
+#   postprocessing — runs LAST, after evaluation and before the workflow's
+#                    terminal state, on the shared tail so it too fires in both
+#                    processing modes. Operates on the finished document, and a
+#                    mutation there reaches the persisted DynamoDB row, the
+#                    reporting/Athena rows, and the UI.
+#
+# Every other point is a POST-STEP point whose hooks live in a
+# `<section>.postHook` LIST.
 _HOOK_TO_STEP = {
     "preprocessing": "preprocessing",
     "postOcr": "ocr",
@@ -168,13 +177,27 @@ _HOOK_TO_STEP = {
     # extraction, so its post-step hook point no longer exists.
     "postRuleValidation": "rule_validation",
     "postSummarization": "summarization",
+    "postprocessing": "postprocessing",
 }
 
+# Points whose config section IS the hook: `arn`/`args`/`onError`/`enabled` live
+# directly on the section, with no list. Membership is explicit rather than
+# derived from the point name — `postprocessing` is flat but starts with "post",
+# so the old `startswith("pre")` heuristic would have looked for a
+# `postprocessing.postHook` list that does not exist.
+_FLAT_HOOK_POINTS = frozenset({"preprocessing", "postprocessing"})
 
-def _hook_list_field(point: str) -> str:
-    """The hook-list field name for a hook point: preHook for pre* points,
-    postHook otherwise. Keeps pre/post hooks in the same section distinct."""
-    return "preHook" if point.startswith("pre") else "postHook"
+# Points where a hook's `halt` request means something. `preprocessing` halts
+# before any processing happens (the PII-redaction "spawned a redacted copy"
+# pattern). At `postprocessing` the document is already finished and there is
+# nothing downstream to skip, so a `halt` there is reported and ignored rather
+# than silently appearing to do something.
+_HALT_CAPABLE_POINTS = frozenset({"preprocessing"})
+
+
+def _is_flat_hook_point(point: str) -> bool:
+    """True when the point's config section is itself a single hook (no list)."""
+    return point in _FLAT_HOOK_POINTS
 
 
 _CONFIG_METADATA_FIELDS = {
@@ -319,8 +342,8 @@ def _read_hooks_from_config(
     normalized entries.
 
     Two shapes:
-      - `preprocessing` (pre* points): a SINGLE inline hook — arn/args/onError/
-        enabled live directly on the `preprocessing` section (not a list).
+      - flat points (`preprocessing`, `postprocessing`): a SINGLE inline hook —
+        arn/args/onError/enabled live directly on the section (not a list).
       - post-step points: a `<section>.postHook` LIST.
     """
     step = _HOOK_TO_STEP.get(point)
@@ -340,13 +363,13 @@ def _read_hooks_from_config(
     if not isinstance(step_block, dict):
         return []
 
-    # Pre* points: the section IS the single hook (flattened arn/args/...).
-    if point.startswith("pre"):
+    # Flat points: the section IS the single hook (flattened arn/args/...).
+    if _is_flat_hook_point(point):
         h = _normalize_hook(step_block)
         return [h] if h else []
 
-    # Post* points: a list under <section>.postHook.
-    raw = step_block.get(_hook_list_field(point)) or []
+    # Post-step points: a list under <section>.postHook.
+    raw = step_block.get("postHook") or []
     if not isinstance(raw, list):
         return []
     valid = [n for n in (_normalize_hook(h) for h in raw) if n]
@@ -778,13 +801,27 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     # do that safely). Any successful hook returning result.halt == true
     # halts the workflow. Used by the preprocessing hook to short-circuit a
     # document whose only purpose was to spawn a redacted copy.
-    halt = any(
+    #
+    # Only honored where the workflow can actually act on it. At
+    # `postprocessing` the document is finished and there is nothing left to
+    # skip, so a `halt` there is reported under `haltIgnored` rather than
+    # returned as a `halt` the state machine would not read anyway — the
+    # difference between "asked and ignored" and "never asked" is worth having
+    # in the execution history.
+    halt_requested = any(
         r.get("ok")
         and isinstance(r.get("result"), dict)
         and r["result"].get("halt") is True
         for r in results
     )
-    return {
+    halt = halt_requested and point in _HALT_CAPABLE_POINTS
+    if halt_requested and not halt:
+        logger.warning(
+            "Hook at %s requested halt, which is not supported at this point "
+            "(the document is already finished); continuing",
+            point,
+        )
+    out: Dict[str, Any] = {
         "hookPoint": point,
         "configVersion": version,
         "invoked": len(results),
@@ -796,3 +833,6 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
         "documentUpdatedBy": updated_by,
         "results": results,
     }
+    if halt_requested and not halt:
+        out["haltIgnored"] = True
+    return out

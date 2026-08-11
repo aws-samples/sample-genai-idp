@@ -40,7 +40,7 @@ ui:
       argv: ["npm", "ci"]
     - cwd: feature-ui
       argv: ["npm", "run", "build"]
-# Minimal preset carrying the `preprocessing` section defaults + preHook entry
+# Minimal preset carrying the `preprocessing` section defaults + hook entry
 # (hook ARN injected at install by the ui-deployer). Installed NON-ACTIVE as
 # `pii-anonymizer-v<version>`. The in-UI Config Pairing wizard is the primary
 # path (clones an admin's existing working config into a matched pair).

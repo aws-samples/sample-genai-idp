@@ -1584,7 +1584,8 @@ input RegisterFeatureInput {
 """One pipeline hook registration the host's Step Functions workflow
 dispatches to at the named pipeline point."""
 input PipelineHookInput {
-  point: String!     # postOcr | postClassification | postExtraction | postAssessment | postRuleValidation | postSummarization
+  point: String!     # preprocessing | postOcr | postClassification | postExtraction | postRuleValidation | postSummarization | postprocessing
+                     # (preprocessing and postprocessing are single-hook points: one feature owns each)
   arn: String!       # Lambda ARN to invoke
   order: Int         # ordering within hooks at the same point (lower = earlier). Default 100.
   onError: String    # 'continue' | 'fail' | 'skip-remaining'. Default 'continue'.

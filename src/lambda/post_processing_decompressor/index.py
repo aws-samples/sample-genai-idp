@@ -5,7 +5,7 @@ import boto3
 import json
 import os
 import logging
-from idp_common.models import Document
+from idp_common.models import Document, Status
 from typing import Dict, Any
 
 logger = logging.getLogger()
@@ -15,6 +15,28 @@ lambda_client = boto3.client('lambda')
 
 CUSTOM_POST_PROCESSOR_ARN = os.environ['CUSTOM_POST_PROCESSOR_ARN']
 WORKING_BUCKET = os.environ['WORKING_BUCKET']
+
+# Ceiling on the payload we hand to an ASYNCHRONOUS Lambda invoke. AWS caps an
+# InvocationType='Event' payload at 1MB — NOT the 6MB that applies to a
+# synchronous RequestResponse invoke, and not the 256KB quoted for some other
+# async AWS APIs. Verified empirically against us-west-2: a 1,441,631-byte
+# payload is rejected with
+#   RequestEntityTooLargeException: ... too large for the Event invocation type
+#   (limit 1048576 bytes)
+# while a ~700KB payload is accepted (202).
+#
+# Inflating the compressed document reference easily blows past 1MB on a large
+# multi-section packet, which used to surface as that exception, then 3
+# EventBridge retries, then the DLQ — so the hook silently never fired for
+# exactly the biggest documents. When the decompressed payload does not fit we
+# send the ORIGINAL compressed event instead (always small) rather than dropping
+# the invocation; the custom post-processor then resolves the reference itself.
+#
+# Held ~4.6% under the 1,048,576-byte hard limit to cover the invoke envelope, so
+# the check is conservative without needlessly downgrading documents that would
+# have fitted (an earlier 240KB threshold sent everything above a quarter of the
+# real ceiling down the fallback path).
+MAX_ASYNC_PAYLOAD_BYTES = 1_000_000
 
 
 def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
@@ -32,11 +54,22 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         Response from custom post-processor lambda invocation
     """
     logger.info(f"Processing event for custom post-processor invocation")
-    
+
     try:
         input_decompressed = False
         output_decompressed = False
-        
+
+        # Decompression rewrites exactly two values in place — the `detail.input`
+        # and `detail.output` JSON STRINGS — so remembering those two is enough to
+        # restore the original (compressed) event for the too-large fallback
+        # below. Deliberately not a deepcopy of the whole event: that would double
+        # peak memory for a payload we usually never send.
+        original_detail_strings = {
+            k: event.get('detail', {}).get(k)
+            for k in ('input', 'output')
+            if isinstance(event.get('detail', {}), dict)
+        }
+
         # Decompress input document if present and compressed
         if event.get('detail', {}).get('input'):
             input_data = json.loads(event['detail']['input'])
@@ -79,9 +112,35 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             logger.warning("Document not found in expected locations, using entire output")
             document_data = output_data
         
+        # A preprocessing hook (e.g. PII anonymization in "redact copy and stop"
+        # mode) halts the execution for the ORIGINAL document after spawning a
+        # redacted copy. That execution still ends as SUCCEEDED, so the
+        # EventBridge rule matches — but handing the un-redacted original to a
+        # customer's post-processor is exactly what the redaction was meant to
+        # prevent, and the workflow tracker is about to delete it. The status
+        # lives inside detail.output (invisible to an EventBridge pattern), so
+        # the check has to happen here. The redacted copy is processed as its own
+        # document and fires this hook normally.
+        superseded_status = Status.REDACTED_SUPERSEDED.value
+        if isinstance(document_data, dict) and document_data.get('status') == superseded_status:
+            logger.info(
+                "Skipping custom post-processor: document status is %s "
+                "(a preprocessing hook superseded it with a redacted copy)",
+                superseded_status,
+            )
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'message': 'Skipped custom post-processor for superseded document',
+                    'customProcessorArn': CUSTOM_POST_PROCESSOR_ARN,
+                    'skipped': True,
+                    'reason': superseded_status,
+                })
+            }
+
         # Check if document is compressed
         is_compressed = isinstance(document_data, dict) and document_data.get('compressed', False)
-        
+
         if is_compressed:
             logger.info(f"Output document is compressed, decompressing from S3 URI: {document_data.get('s3_uri', 'N/A')}")
             
@@ -107,27 +166,60 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         else:
             logger.info("Output document is not compressed, passing through as-is")
         
-        # Invoke custom post-processor lambda with decompressed payload
+        # Invoke custom post-processor lambda with decompressed payload.
+        #
+        # An async (Event) invoke caps the payload at 256KB, and a decompressed
+        # document can exceed that. Rather than fail — which cost the invocation
+        # entirely after EventBridge's retries — fall back to the original
+        # compressed event, which is always small. The post-processor then sees
+        # the same `{compressed: true, s3_uri, ...}` reference it would have
+        # received before this decompressor existed, and can resolve it via
+        # idp_common (or a plain S3 GET + gunzip).
+        payload = json.dumps(event)
+        payload_bytes = len(payload.encode('utf-8'))
+        sent_compressed_fallback = False
+
+        if payload_bytes > MAX_ASYNC_PAYLOAD_BYTES:
+            logger.warning(
+                "Decompressed payload is %d bytes, over the %d-byte async invoke "
+                "limit; invoking the custom post-processor with the ORIGINAL "
+                "compressed event instead. The post-processor must resolve the "
+                "compressed document reference itself for this document.",
+                payload_bytes,
+                MAX_ASYNC_PAYLOAD_BYTES,
+            )
+            # Restore the two strings decompression replaced, then re-serialize.
+            for key, original in original_detail_strings.items():
+                if original is None:
+                    event['detail'].pop(key, None)
+                else:
+                    event['detail'][key] = original
+            payload = json.dumps(event)
+            sent_compressed_fallback = True
+            input_decompressed = False
+            output_decompressed = False
+
         logger.info(f"Invoking custom post-processor: {CUSTOM_POST_PROCESSOR_ARN}")
-        
+
         response = lambda_client.invoke(
             FunctionName=CUSTOM_POST_PROCESSOR_ARN,
             InvocationType='Event',  # Async invocation
-            Payload=json.dumps(event)
+            Payload=payload
         )
-        
+
         logger.info(f"Custom post-processor invoked successfully. StatusCode: {response['StatusCode']}")
-        
+
         return {
             'statusCode': 200,
             'body': json.dumps({
                 'message': 'Successfully invoked custom post-processor',
                 'customProcessorArn': CUSTOM_POST_PROCESSOR_ARN,
                 'inputDecompressed': input_decompressed,
-                'outputDecompressed': output_decompressed
+                'outputDecompressed': output_decompressed,
+                'sentCompressedFallback': sent_compressed_fallback
             })
         }
-        
+
     except Exception as e:
         logger.error(f"Error processing event: {str(e)}", exc_info=True)
         raise
