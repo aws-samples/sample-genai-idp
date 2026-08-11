@@ -245,6 +245,14 @@ def _apply_flat_hook(
     Unregistering (`new_entries` empty): clears the ARN and disables the section
     only if THIS feature owns it. `args` are left in place so re-installing
     restores the previous behavior.
+
+    Clearing on unregister is load-bearing, not just tidiness. A flat point's
+    hook is invoked by ARN, so an uninstalled feature's ARN left behind names a
+    Lambda that no longer exists — and the PII Anonymizer's shipped preset sets
+    `onError: fail`, which makes the dispatcher raise and the workflow land in
+    its terminal `PreprocessingHookFailed` state. That fails EVERY subsequent
+    document until an admin hand-edits the config. Disabling the section is the
+    fail-safe outcome; `args` survive so a re-install is a one-field change.
     """
     owner = block.get("featureId") or ""
     if not new_entries:

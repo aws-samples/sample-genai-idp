@@ -367,3 +367,66 @@ def test_flat_and_list_points_register_together(
     item = _table().get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"]
     assert item["postprocessing"]["arn"] == _FLAT_ARN
     assert item["rule_validation"]["postHook"][0]["featureId"] == "deliver"
+
+
+def test_unregister_clears_a_stale_flat_arn_that_would_fail_every_document(
+    monkeypatch, configuration_table, load_lambda
+):
+    """The reason unregister clears a flat section rather than leaving it.
+
+    A flat hook is invoked by ARN. Left behind after the owning feature's stack
+    is deleted, that ARN names a Lambda that no longer exists — and the PII
+    Anonymizer's shipped preset sets `onError: fail`, so the dispatcher raises
+    and the workflow ends in its terminal `PreprocessingHookFailed` state. Every
+    subsequent document would fail until an admin hand-edited the config.
+
+    Pins the fail-safe end state: disabled, no ARN, args retained for re-install.
+    """
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-pii-v1", filler=2)
+    table = _table()
+    item = table.get_item(Key={"Configuration": "Config#zz-pii-v1"})["Item"]
+    item["preprocessing"] = {
+        "enabled": True,
+        "featureId": "pii-anonymizer",
+        "arn": "arn:aws:lambda:us-east-1:123456789012:function:PiiHook",
+        "onError": "fail",
+        "args": [{"key": "mode", "value": "redactcopy_and_stop"}],
+    }
+    table.put_item(Item=item)
+
+    mod.handler(
+        make_appsync_event("unregisterFeatureHooks", {"featureId": "pii-anonymizer"}),
+        None,
+    )
+
+    pp = table.get_item(Key={"Configuration": "Config#zz-pii-v1"})["Item"][
+        "preprocessing"
+    ]
+    # Both conditions matter: `enabled: False` alone is what the dispatcher
+    # checks, and a null arn means even a re-enabled section cannot invoke the
+    # deleted function.
+    assert pp["enabled"] is False
+    assert pp["arn"] is None
+    assert pp["args"] == [{"key": "mode", "value": "redactcopy_and_stop"}]
+
+
+def test_unregister_leaves_another_features_flat_hook_running(
+    monkeypatch, configuration_table, load_lambda
+):
+    """Uninstalling feature A must not disable feature B's flat hook — the clear
+    is scoped to the recorded owner."""
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-active-v1", filler=2)
+    mod.handler(_register_event("pii-anonymizer", [_flat_hook("preprocessing")]), None)
+
+    mod.handler(
+        make_appsync_event("unregisterFeatureHooks", {"featureId": "other-feature"}),
+        None,
+    )
+    pp = _table().get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"][
+        "preprocessing"
+    ]
+    assert pp["enabled"] is True
+    assert pp["arn"] == _FLAT_ARN
+    assert pp["featureId"] == "pii-anonymizer"

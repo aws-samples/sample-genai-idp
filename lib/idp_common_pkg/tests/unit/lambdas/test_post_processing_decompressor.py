@@ -10,7 +10,9 @@ document so the external function needs no `idp_common` dependency.
 The tests pin two failure modes that made the hook silently not fire:
 
 - **Async payload ceiling.** The handoff is `InvocationType='Event'`, which AWS
-  caps at 256KB (the 6MB limit applies to synchronous invokes). Inflating the
+  caps at 1MB — verified live: a 1,441,631-byte payload is rejected with
+  `RequestEntityTooLargeException ... (limit 1048576 bytes)`, while ~700KB is
+  accepted. (The 6MB limit applies only to synchronous invokes.) Inflating the
   document pushes a large multi-section packet past that, so the invoke raised
   `RequestEntityTooLargeException` → 3 EventBridge retries → DLQ. The hook never
   fired for exactly the biggest documents. It now falls back to the original
@@ -119,13 +121,13 @@ def test_compressed_document_is_decompressed_before_invoke(mod, monkeypatch):
 def test_oversized_decompressed_payload_falls_back_to_compressed_event(
     mod, monkeypatch
 ):
-    """The 256KB async ceiling. Rather than raise (and lose the invocation after
+    """The 1MB async ceiling. Rather than raise (and lose the invocation after
     EventBridge's retries), send the ORIGINAL compressed event — always small —
     so the hook still fires for large documents."""
     huge = {
         "id": "doc.pdf",
         "status": "COMPLETED",
-        "pages": {str(i): {"text": "x" * 2000} for i in range(200)},
+        "pages": {str(i): {"text": "x" * 4000} for i in range(400)},
     }
     inflated = MagicMock()
     inflated.num_pages = 200
@@ -134,7 +136,12 @@ def test_oversized_decompressed_payload_falls_back_to_compressed_event(
     monkeypatch.setattr(mod.Document, "load_document", lambda *a, **k: inflated)
 
     ref = _compressed_ref()
-    result = mod.handler(_event(ref), None)
+    event = _event(ref)
+    # Make the INPUT compressed too, so decompression rewrites both strings and
+    # the rollback below is actually exercised on both (not just `output`).
+    event["detail"]["input"] = json.dumps({"document": _compressed_ref()})
+    original_input = event["detail"]["input"]
+    result = mod.handler(event, None)
 
     body = json.loads(result["body"])
     assert body["sentCompressedFallback"] is True
@@ -145,6 +152,31 @@ def test_oversized_decompressed_payload_falls_back_to_compressed_event(
     assert json.loads(payload["detail"]["output"])["document"] == ref
     sent_bytes = len(mod.lambda_client.invoke.call_args.kwargs["Payload"].encode())
     assert sent_bytes <= mod.MAX_ASYNC_PAYLOAD_BYTES
+
+    # BOTH decompressed strings are rolled back, not just the output one — the
+    # fallback restores `detail.input`/`detail.output` in place rather than
+    # deep-copying the event up front, so a partial rollback would ship a
+    # half-inflated event.
+    assert payload["detail"]["input"] == original_input
+    assert "inputDecompressed" in body and body["inputDecompressed"] is False
+
+
+def test_fallback_rollback_drops_a_key_that_was_absent(mod, monkeypatch):
+    """Rollback must restore *absence*, not write None: an event with no
+    `detail.input` must not gain an `input: null` key on the fallback path."""
+    huge = {
+        "id": "doc.pdf",
+        "pages": {str(i): {"text": "x" * 4000} for i in range(400)},
+    }
+    inflated = MagicMock()
+    inflated.num_pages = 200
+    inflated.sections = ["1"]
+    inflated.to_dict.return_value = huge
+    monkeypatch.setattr(mod.Document, "load_document", lambda *a, **k: inflated)
+
+    result = mod.handler(_event(_compressed_ref(), include_input=False), None)
+    assert json.loads(result["body"])["sentCompressedFallback"] is True
+    assert "input" not in _invoked_payload(mod)["detail"]
 
 
 def test_payload_just_under_the_limit_is_still_sent_decompressed(mod, monkeypatch):

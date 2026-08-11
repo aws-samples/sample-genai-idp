@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT-0
 
 import boto3
-import copy
 import json
 import os
 import logging
@@ -18,16 +17,26 @@ CUSTOM_POST_PROCESSOR_ARN = os.environ['CUSTOM_POST_PROCESSOR_ARN']
 WORKING_BUCKET = os.environ['WORKING_BUCKET']
 
 # Ceiling on the payload we hand to an ASYNCHRONOUS Lambda invoke. AWS caps an
-# InvocationType='Event' payload at 256KB (the 6MB limit is for synchronous
-# RequestResponse), and inflating the compressed document reference can easily
-# blow past that on a large multi-section packet — which used to surface as
-# RequestEntityTooLargeException, 3 EventBridge retries, then the DLQ, so the
-# hook silently never fired for exactly the biggest documents. When the
-# decompressed payload does not fit we send the ORIGINAL compressed event
-# instead (always small) rather than dropping the invocation; the custom
-# post-processor then resolves the reference itself. Set a little under 256KB to
-# leave room for the invoke envelope.
-MAX_ASYNC_PAYLOAD_BYTES = 240 * 1024
+# InvocationType='Event' payload at 1MB — NOT the 6MB that applies to a
+# synchronous RequestResponse invoke, and not the 256KB quoted for some other
+# async AWS APIs. Verified empirically against us-west-2: a 1,441,631-byte
+# payload is rejected with
+#   RequestEntityTooLargeException: ... too large for the Event invocation type
+#   (limit 1048576 bytes)
+# while a ~700KB payload is accepted (202).
+#
+# Inflating the compressed document reference easily blows past 1MB on a large
+# multi-section packet, which used to surface as that exception, then 3
+# EventBridge retries, then the DLQ — so the hook silently never fired for
+# exactly the biggest documents. When the decompressed payload does not fit we
+# send the ORIGINAL compressed event instead (always small) rather than dropping
+# the invocation; the custom post-processor then resolves the reference itself.
+#
+# Held ~4.6% under the 1,048,576-byte hard limit to cover the invoke envelope, so
+# the check is conservative without needlessly downgrading documents that would
+# have fitted (an earlier 240KB threshold sent everything above a quarter of the
+# real ceiling down the fallback path).
+MAX_ASYNC_PAYLOAD_BYTES = 1_000_000
 
 
 def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
@@ -50,10 +59,16 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         input_decompressed = False
         output_decompressed = False
 
-        # Keep the untouched (compressed) event: decompression mutates `event`
-        # in place, and this is the fallback payload when the inflated one is
-        # too large for an async invoke (see MAX_ASYNC_PAYLOAD_BYTES).
-        original_event = copy.deepcopy(event)
+        # Decompression rewrites exactly two values in place — the `detail.input`
+        # and `detail.output` JSON STRINGS — so remembering those two is enough to
+        # restore the original (compressed) event for the too-large fallback
+        # below. Deliberately not a deepcopy of the whole event: that would double
+        # peak memory for a payload we usually never send.
+        original_detail_strings = {
+            k: event.get('detail', {}).get(k)
+            for k in ('input', 'output')
+            if isinstance(event.get('detail', {}), dict)
+        }
 
         # Decompress input document if present and compressed
         if event.get('detail', {}).get('input'):
@@ -173,7 +188,13 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 payload_bytes,
                 MAX_ASYNC_PAYLOAD_BYTES,
             )
-            payload = json.dumps(original_event)
+            # Restore the two strings decompression replaced, then re-serialize.
+            for key, original in original_detail_strings.items():
+                if original is None:
+                    event['detail'].pop(key, None)
+                else:
+                    event['detail'][key] = original
+            payload = json.dumps(event)
             sent_compressed_fallback = True
             input_decompressed = False
             output_decompressed = False

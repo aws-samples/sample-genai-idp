@@ -305,15 +305,19 @@ Resources:
                   name beginning with `GENAIIDP-`.
                 order: 1
               onError:
+                # `skip-remaining` is deliberately NOT offered: there is only
+                # ever one preprocessing hook, so "stop the later hooks at this
+                # point" has nothing to act on and behaves exactly like
+                # `continue`. The dispatcher still accepts the value if an older
+                # config stores it (it falls through to the continue path).
                 type: string
-                enum: ["continue", "fail", "skip-remaining"]
+                enum: ["continue", "fail"]
                 default: continue
                 description: >-
                   Behavior when the hook errors. `fail` STOPS the execution in a
                   terminal state and never falls through to processing the
                   un-preprocessed original — use it whenever the hook must gate
-                  processing (e.g. PII redaction). (`skip-remaining` behaves like
-                  `continue` here: there is only ever one preprocessing hook.)
+                  processing (e.g. PII redaction).
                 order: 2
               args:
                 type: array

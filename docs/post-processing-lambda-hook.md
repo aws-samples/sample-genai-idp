@@ -101,13 +101,15 @@ flowchart LR
 > **Performance**: The decompression step adds minimal latency (typically < 1 second) and is transparent to your custom lambda function.
 
 > **Very large documents fall back to the compressed reference**: the handoff to
-> your Lambda is an **asynchronous** invoke, which AWS caps at **256 KB** (the
+> your Lambda is an **asynchronous** invoke, which AWS caps at **1 MB** (the
 > 6 MB limit applies only to synchronous invokes). When a decompressed document
 > exceeds that, the decompressor invokes your function with the **original,
 > compressed** event instead of failing — so the hook still fires. In that case
 > `detail.output`'s document is a `{"compressed": true, "s3_uri": ..., ...}`
-> reference you resolve yourself (`idp_common.models.Document.load_document`, or
-> a plain S3 `GET` + gunzip of the JSON). The decompressor logs a warning naming
+> reference you resolve yourself — `idp_common.models.Document.load_document`,
+> or a plain S3 `GET` of that key (the object is uncompressed JSON despite the
+> `compressed: true` flag, which refers to the *event payload* being a reference
+> rather than the S3 object being gzipped). The decompressor logs a warning naming
 > the size, and its response body carries `sentCompressedFallback: true`. A hook
 > that must handle arbitrarily large documents should therefore check for
 > `document.compressed` before assuming inflated data.
