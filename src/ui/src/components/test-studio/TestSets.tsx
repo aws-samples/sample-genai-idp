@@ -31,6 +31,7 @@ import {
   deleteTestSets,
   getTestSets,
   estimateReviewEffort,
+  getDraftLabelJob,
   listBucketFiles,
   updateTestSet,
   publishTestSetVersion,
@@ -136,6 +137,14 @@ const TestSets = (): React.JSX.Element => {
    */
   const [tiers, setTiers] = useState<Record<string, { tier: string; reason: string }>>({});
 
+  /**
+   * Fetch each set's tier once, keyed on the label state it was computed from.
+   *
+   * Deliberately NOT called from loadTestSets: that runs on a 3s poll while any
+   * set is active, so calling it there fired one estimateReviewEffort per labeled
+   * set every tick. Re-fetching only when a set's label state changes is what
+   * makes the tier current without the request storm.
+   */
   const loadTiers = useCallback(async (sets: TestSetItem[]) => {
     const client2 = generateClient();
     await Promise.all(
@@ -168,7 +177,6 @@ const TestSets = (): React.JSX.Element => {
       const result = await client.graphql({ query: getTestSets });
       console.log('TestSets: GraphQL result:', result);
       const backendTestSets = result.data.getTestSets || [];
-      loadTiers(backendTestSets as TestSetItem[]);
 
       // Upsert: merge backend data with existing UI state, deduplicating by id
       setTestSets((prevTestSets) => {
@@ -203,6 +211,51 @@ const TestSets = (): React.JSX.Element => {
   React.useEffect(() => {
     loadTestSets();
   }, []);
+
+  /**
+   * Refresh tiers when the label state of the listed sets actually changes.
+   *
+   * The signature includes labelJobStatus so a run finishing re-rates the set,
+   * but an ordinary poll tick (which returns identical state) does not.
+   */
+  const labelStateSignature = testSets.map((ts) => `${ts.id}:${ts.labelState ?? ''}:${ts.labelJobStatus ?? ''}`).join('|');
+
+  React.useEffect(() => {
+    if (testSets.length > 0) loadTiers(testSets);
+  }, [labelStateSignature, loadTiers]);
+
+  /**
+   * Drive any labeling job that is still RUNNING.
+   *
+   * Draft labels are harvested ON READ, so a job only advances while something
+   * polls getDraftLabelJob. This list polls getTestSets, which does not harvest —
+   * so a run watched from here appeared permanently stuck at "Labeling" while the
+   * page looked busy. Observed live: 34 minutes at 0/5 with every document
+   * already COMPLETED, including across a manual page refresh.
+   */
+  React.useEffect(() => {
+    const running = testSets.filter((ts) => ts.labelJobStatus === 'RUNNING' && ts.labelJobId);
+    if (running.length === 0) return undefined;
+
+    const client2 = generateClient();
+    const interval = setInterval(() => {
+      running.forEach((ts) => {
+        client2.graphql({ query: getDraftLabelJob, variables: { testSetId: ts.id, jobId: ts.labelJobId as string } }).catch((err) => {
+          // Best-effort: a failed poll must not break the list.
+          console.debug(`Could not advance labeling job for ${ts.id}:`, err);
+        });
+      });
+    }, 5000);
+
+    return () => clearInterval(interval);
+    // Keyed on the running set ids, so this re-arms when a job starts or ends
+    // rather than on every list refresh.
+  }, [
+    testSets
+      .filter((ts) => ts.labelJobStatus === 'RUNNING')
+      .map((ts) => ts.id)
+      .join(','),
+  ]);
 
   // Simple polling for active test sets
   React.useEffect(() => {
