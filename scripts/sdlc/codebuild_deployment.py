@@ -1343,7 +1343,22 @@ def test_step13_permission_boundaries(stack_name):
 # pinned to that version, then deletes everything it made. A leftover hook ARN
 # would be actively harmful — a stale ARN at a flat point with onError:fail fails
 # every subsequent document — so teardown runs in a `finally`.
-_HOOK_FN_PREFIX = "GENAIIDP-citest-hook"  # dispatcher IAM allows GENAIIDP-*
+# Naming here has to satisfy TWO different IAM policies at once, which is why it
+# is not simply `GENAIIDP-*`:
+#
+#   * The CI CodeBuild role (scripts/sdlc/cfn/codepipeline-s3.yml) scopes its
+#     `iam:*` to `role/idp-*` and its `lambda:*` to `function:idp-*`. A
+#     `GENAIIDP-` prefixed role or function is AccessDenied — which is exactly
+#     how this step first failed in the pipeline.
+#   * The host dispatcher (patterns/unified/template.yaml) will only invoke a
+#     hook that EITHER is named `GENAIIDP-*` OR carries the `idp:feature-id` tag.
+#
+# So the resources are named `idp-*` for the CI role, and the dispatcher is
+# satisfied via the TAG path instead of the name path. That is also the more
+# representative test: tagging is how installed Feature Platform features clear
+# the check, while the `GENAIIDP-*` name is the admin escape hatch.
+_HOOK_FN_PREFIX = "idp-citest-hook"
+_HOOK_FEATURE_ID = "ci-hook-test"  # value of the idp:feature-id tag
 
 # Marker the hook writes into the document; asserted in the persisted document.
 _HOOK_MARKER_KEY = "ci_hook_marker"
@@ -1582,6 +1597,12 @@ def test_step14_pipeline_hooks(stack_name):
                     Timeout=120,
                     MemorySize=512,
                     Environment={"Variables": {"MARKER_KEY": _HOOK_MARKER_KEY}},
+                    # Load-bearing, not metadata: the dispatcher's ABAC
+                    # condition (StringLike aws:ResourceTag/idp:feature-id)
+                    # is the ONLY thing authorizing it to invoke a function
+                    # not named GENAIIDP-*. Without this tag every dispatch
+                    # fails closed with AccessDenied.
+                    Tags={"idp:feature-id": _HOOK_FEATURE_ID},
                 )
                 created_fn = True
                 break
@@ -1604,7 +1625,25 @@ def test_step14_pipeline_hooks(stack_name):
                 "success": False,
                 "error": f"Could not resolve the ARN of hook Lambda {fn_name}",
             }
-        print(f"  ✓ Hook Lambda ready: {hook_arn}")
+        # Tag unconditionally rather than relying on create_function's Tags: the
+        # ResourceConflictException path above reuses a function left by an
+        # interrupted earlier run, and update_function_code does NOT set tags —
+        # so that function would be untagged and every dispatch would fail
+        # closed with AccessDenied.
+        lam.tag_resource(
+            Resource=hook_arn, Tags={"idp:feature-id": _HOOK_FEATURE_ID}
+        )
+        tags = lam.list_tags(Resource=hook_arn).get("Tags", {})
+        if tags.get("idp:feature-id") != _HOOK_FEATURE_ID:
+            return {
+                "success": False,
+                "error": (
+                    f"Hook Lambda {fn_name} is missing the idp:feature-id tag "
+                    f"(got {tags!r}); the dispatcher would fail closed with "
+                    f"AccessDenied because the function is not named GENAIIDP-*"
+                ),
+            }
+        print(f"  ✓ Hook Lambda ready: {hook_arn} (tagged idp:feature-id)")
 
         # --- 2. Register the hook in a DEDICATED config version ------------
         # Start from the stack's own default config so the version is valid.
