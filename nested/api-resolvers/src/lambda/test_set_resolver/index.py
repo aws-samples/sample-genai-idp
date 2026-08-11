@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime
 
 import boto3
@@ -1328,9 +1329,17 @@ def get_annotation_queue(args, event=None):
 
 
 def _collect_queue_documents(test_set_id):
-    """All documents in the set with their label metadata, up to the queue cap."""
+    """Documents in the set with their label metadata, up to the queue cap.
+
+    Time-bounded for the same reason the estimator is: each page reads every
+    section on it from S3, which measured ~24s per 200 documents on `docsplit`, so
+    paging to a larger cap timed the Lambda out. A short queue is workable — an
+    annotator takes documents from the front — where a timeout means the workspace
+    cannot open at all. inspectedDocs tells the UI how much was ranked.
+    """
     documents = []
     next_token = None
+    started = time.monotonic()
     while len(documents) < MAX_DOCS_FOR_ESTIMATE:
         page = get_test_set_documents(
             {
@@ -1342,6 +1351,13 @@ def _collect_queue_documents(test_set_id):
         documents.extend(page.get("documents") or [])
         next_token = page.get("nextToken")
         if not next_token:
+            break
+        if time.monotonic() - started > SAMPLING_TIME_BUDGET_SECONDS:
+            logger.warning(
+                f"getAnnotationQueue({test_set_id}): stopped collecting at "
+                f"{len(documents)} document(s) after "
+                f"{SAMPLING_TIME_BUDGET_SECONDS}s"
+            )
             break
     return documents
 
@@ -1492,7 +1508,27 @@ def estimate_review_effort(args):
 # estimate is a planning number, not an audit: past this many documents the
 # sample is more than enough to shape the curve, and reading every section of a
 # 5,000-document set would blow the resolver's timeout.
-MAX_DOCS_FOR_ESTIMATE = 500
+#
+# Measured on `docsplit` (500 documents, 2 sections each, so 1,000 baseline
+# objects): a 200-document page costs ~24s, because each document's sections are
+# read from S3 to recover their confidence. Reaching a 500-document sample took
+# three sequential pages — ~72s against a 60s Lambda timeout, so the estimate
+# never returned and the modal reported "Failed to calculate the review estimate".
+#
+# 200 keeps the whole call inside one page for every pre-deployed set. A sample
+# that size already pins the curve: the reliability table is 10 bins, and the
+# effort model stops measuring document shape after 20 sections. The cost of the
+# smaller sample is a wider docs-to-review range on very large sets, which the
+# estimate already reports honestly via sampledDocs and estimateConfidence —
+# strictly better than returning nothing.
+MAX_DOCS_FOR_ESTIMATE = 200
+
+# Hard stop for any operation that pages the document list, independent of the
+# document cap. Even at a smaller cap a set whose pages are unusually slow must
+# not spend the whole invocation collecting; better a narrower sample than a
+# timeout. Shared by the estimator and the annotation queue, which page
+# identically.
+SAMPLING_TIME_BUDGET_SECONDS = 25
 
 
 def _collect_doc_confidences(test_set_id):
@@ -1512,6 +1548,7 @@ def _collect_doc_confidences(test_set_id):
     test_set_bucket = os.environ["TEST_SET_BUCKET"]
     documents = []
     next_token = None
+    started = time.monotonic()
 
     while len(documents) < MAX_DOCS_FOR_ESTIMATE:
         page = get_test_set_documents(
@@ -1524,6 +1561,17 @@ def _collect_doc_confidences(test_set_id):
         documents.extend(page.get("documents") or [])
         next_token = page.get("nextToken")
         if not next_token:
+            break
+        # Stop sampling rather than time the invocation out. A narrower sample
+        # still produces a usable estimate — and says so, via sampledDocs — where
+        # a timeout produces nothing but an error banner.
+        if time.monotonic() - started > SAMPLING_TIME_BUDGET_SECONDS:
+            logger.warning(
+                f"estimateReviewEffort({test_set_id}): stopped sampling at "
+                f"{len(documents)} document(s) after "
+                f"{SAMPLING_TIME_BUDGET_SECONDS}s; the estimate is based on that "
+                "sample"
+            )
             break
 
     confidences = []

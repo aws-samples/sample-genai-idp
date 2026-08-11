@@ -1897,10 +1897,10 @@ class TestTestSetResolver:
     ):
         """Regression: a large set must not report its sampling cap as its size.
 
-        Found on a live stack: a 2008-document test set reported totalDocs=500
-        (MAX_DOCS_FOR_ESTIMATE), which understated the review work, the effort,
-        and the audit pool by 4x. fileCount is the set's size; the sampled
-        confidences are only how much of it we inspected.
+        Found on a live stack: a 2008-document test set reported totalDocs as the
+        sampling cap (MAX_DOCS_FOR_ESTIMATE), which understated the review work,
+        the effort, and the audit pool several-fold. fileCount is the set's size;
+        the sampled confidences are only how much of it we inspected.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=2008)
@@ -1926,6 +1926,91 @@ class TestTestSetResolver:
         assert result["docsToReview"] <= 2008
         assert result["docsToReviewHigh"] <= 2008
         assert len(result["burndown"]) == 2009  # 0..N inclusive
+
+    def test_estimate_stops_sampling_before_the_lambda_times_out(
+        self, labeling_env, monkeypatch
+    ):
+        """Regression: the estimate must return a narrower answer, never nothing.
+
+        Found on IDP-dev-stack5 via the UI — "Failed to calculate the review
+        estimate" on `docsplit`. Each document's sections are read from S3 to
+        recover their confidence, which measured ~24s per 200-document page (500
+        documents x 2 sections = 1,000 objects). Reaching the old 500-document
+        sample took three sequential pages, ~72s against a 60s Lambda timeout, so
+        the call died and the modal had nothing to show.
+
+        A time budget bounds the paging independently of the document cap: a
+        smaller sample still yields a usable estimate, and sampledDocs reports how
+        much was inspected.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=600)
+        for i in range(5):
+            name = f"doc{i}.pdf"
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": "draft-machine",
+                        "explainability_info": [{"f": {"confidence": 0.5}}],
+                    }
+                ).encode(),
+            )
+
+        # Every page appears to take longer than the whole budget.
+        monkeypatch.setattr(test_set_index, "SAMPLING_TIME_BUDGET_SECONDS", 0)
+
+        result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
+
+        # It returned rather than paging on: an answer, plus how much it saw.
+        assert result["totalDocs"] == 600
+        assert result["sampledDocs"] >= 1
+        assert result["docsToReview"] <= 600
+
+    def test_queue_stops_collecting_before_the_lambda_times_out(
+        self, labeling_env, monkeypatch
+    ):
+        """The workspace must open with a short queue rather than not at all.
+
+        Same root cause as the estimator timeout, and worse in effect: this is the
+        page an annotator lands on, so a timeout here means they cannot work at
+        all. A truncated queue is fine — they take documents from the front — and
+        inspectedDocs reports how much was ranked.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=600)
+        for i in range(4):
+            name = f"doc{i}.pdf"
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": "draft-machine",
+                        "explainability_info": [{"f": {"confidence": 0.4}}],
+                    }
+                ).encode(),
+            )
+
+        monkeypatch.setattr(test_set_index, "SAMPLING_TIME_BUDGET_SECONDS", 0)
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+
+        assert result["totalDocs"] == 600
+        assert result["inspectedDocs"] >= 1
+        assert len(result["documents"]) >= 1
+
+    def test_sampling_cap_fits_in_one_page(self):
+        """The cap must not require multiple sequential pages.
+
+        get_test_set_documents pages at 200, and each page costs a full S3 read of
+        every section on it. A cap above the page size therefore multiplies the
+        wall-clock cost of the estimate — which is exactly what timed out.
+        """
+        assert test_set_index.MAX_DOCS_FOR_ESTIMATE <= 200
 
     def test_estimate_sampled_equals_total_for_a_small_set(self, labeling_env):
         """No extrapolation when every document was inspected."""
