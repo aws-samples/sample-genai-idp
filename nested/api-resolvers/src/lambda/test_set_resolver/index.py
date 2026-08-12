@@ -828,7 +828,9 @@ def reextract_test_set_document(args, event=None):
             test_set_bucket, test_set_id, object_key, document_class
         )
 
-    config_version = input_data.get("configVersion") or meta.get("labelJobConfigVersion")
+    config_version = input_data.get("configVersion") or meta.get(
+        "labelJobConfigVersion"
+    )
     result = generate_draft_labels(
         {
             "input": {
@@ -1091,7 +1093,8 @@ def _alert_counts(explainability_info, inference_result=None):
     alerts = sum(
         1
         for confidence, threshold, _ in found
-        if confidence < (threshold if threshold is not None else DEFAULT_ALERT_THRESHOLD)
+        if confidence
+        < (threshold if threshold is not None else DEFAULT_ALERT_THRESHOLD)
     )
     return alerts, len(found)
 
@@ -1418,6 +1421,11 @@ MAX_DOCS_FOR_ESTIMATE = 200
 # rather than a timeout. Shared by the estimator and the annotation queue.
 SAMPLING_TIME_BUDGET_SECONDS = 25
 
+# Ceiling on baseline sections read to characterise document shape for the effort
+# model. Each read is a separate S3 GET, and sets vary widely in sections per
+# document, so the bound has to be on reads rather than on usable results.
+MAX_SECTIONS_FOR_FIELD_SAMPLE = 40
+
 
 def _collect_doc_confidences(test_set_id):
     """Per-document minimum confidence, plus observed doc shape for the effort model.
@@ -1472,17 +1480,28 @@ def _collect_doc_confidences(test_set_id):
 
     # Effort model input: the number of fields a reviewer has to check drives review
     # time far more than a global average does, so measure it where possible.
+    # Bounded by sections READ, not by counts collected: a set whose baselines carry
+    # no fields yet (an unlabeled set, or split-only ground truth with an empty
+    # inference_result) yields no counts at all, so a success-based cap never trips
+    # and this reads every section in the set one at a time.
     field_counts = []
+    sections_read = 0
     for doc in documents:
+        if sections_read >= MAX_SECTIONS_FOR_FIELD_SAMPLE or len(field_counts) >= 20:
+            break
         for section in doc.get("sections") or []:
+            if (
+                sections_read >= MAX_SECTIONS_FOR_FIELD_SAMPLE
+                or len(field_counts) >= 20
+            ):
+                break
             key = section.get("baselineKey")
             if not key:
                 continue
+            sections_read += 1
             count = _count_baseline_fields(test_set_bucket, key)
             if count:
                 field_counts.append(count)
-        if len(field_counts) >= 20:
-            break  # A sample is enough to characterise the set.
 
     fields_per_doc = (
         sum(field_counts) / len(field_counts)
@@ -2037,31 +2056,28 @@ def delete_test_sets(args):
             continuation_token = None
             while True:
                 list_kwargs = {
-                    'Bucket': test_set_bucket,
-                    'Prefix': f"{test_set_id}/",
+                    "Bucket": test_set_bucket,
+                    "Prefix": f"{test_set_id}/",
                 }
                 if continuation_token:
-                    list_kwargs['ContinuationToken'] = continuation_token
+                    list_kwargs["ContinuationToken"] = continuation_token
                 response = s3_client.list_objects_v2(**list_kwargs)
 
                 objects_to_delete = [
-                    {'Key': key}
-                    for key in (
-                        obj.get('Key') for obj in response.get('Contents', [])
-                    )
+                    {"Key": key}
+                    for key in (obj.get("Key") for obj in response.get("Contents", []))
                     if key
                 ]
                 for i in range(0, len(objects_to_delete), 1000):
-                    batch = objects_to_delete[i:i + 1000]
+                    batch = objects_to_delete[i : i + 1000]
                     s3_client.delete_objects(
-                        Bucket=test_set_bucket,
-                        Delete={'Objects': batch}
+                        Bucket=test_set_bucket, Delete={"Objects": batch}
                     )
                     deleted_count += len(batch)
 
-                if not response.get('IsTruncated'):
+                if not response.get("IsTruncated"):
                     break
-                continuation_token = response.get('NextContinuationToken')
+                continuation_token = response.get("NextContinuationToken")
                 if not continuation_token:
                     # A truncated response without a token would loop forever.
                     logger.warning(

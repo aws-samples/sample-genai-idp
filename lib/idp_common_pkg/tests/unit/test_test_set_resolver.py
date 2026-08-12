@@ -1993,6 +1993,47 @@ class TestTestSetResolver:
         assert result["inspectedDocs"] >= 1
         assert len(result["documents"]) >= 1
 
+    def test_field_sample_is_bounded_when_no_baseline_carries_fields(
+        self, labeling_env, monkeypatch
+    ):
+        """Regression: the effort model's field sample must bound its S3 reads.
+
+        Split-only ground truth has an empty ``inference_result``, so every section
+        yields no field count. A cap on collected counts therefore never trips and
+        the loop reads every section in the set — one GET each — until the Lambda
+        times out. Bounding reads instead keeps it finite.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=30)
+        reads = []
+        for i in range(30):
+            name = f"packet_{i:04d}.pdf"
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            # Six sections each, none carrying extractable fields.
+            for sec in range(1, 7):
+                s3.put_object(
+                    Bucket="test-set-bucket",
+                    Key=f"ts1/baseline/{name}/sections/{sec}/result.json",
+                    Body=json.dumps(
+                        {"document_class": {"type": "packet"}, "inference_result": {}}
+                    ).encode(),
+                )
+
+        real = test_set_index._count_baseline_fields
+
+        def counting(bucket, key):
+            reads.append(key)
+            return real(bucket, key)
+
+        monkeypatch.setattr(test_set_index, "_count_baseline_fields", counting)
+
+        test_set_index.estimate_review_effort({"testSetId": "ts1"})
+
+        # 180 sections exist; the sample must stop well short of reading them all.
+        assert len(reads) <= test_set_index.MAX_SECTIONS_FOR_FIELD_SAMPLE, (
+            f"read {len(reads)} sections; the field sample is unbounded"
+        )
+
     def test_sampling_cap_fits_in_one_page(self):
         """The cap must not require multiple sequential pages.
 
