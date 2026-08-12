@@ -1264,6 +1264,10 @@ type Mutation {
   # is never touched.
   clearDraftLabels(testSetId: String!): TestSet
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Destructive: discards every label in the set, including human-reviewed ones,
+  # plus review state and calibration history. Admin-only.
+  resetTestSetLabels(testSetId: String!): TestSet
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   generateDraftLabels(input: GenerateDraftLabelsInput!): DraftLabelJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Annotator-reachable: correcting a misclassified document is annotation work,

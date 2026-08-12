@@ -85,6 +85,11 @@ ANNOTATOR_ALLOWED_FIELDS = (
     "reextractTestSetDocument",
 )
 
+# Fields narrower than the Admin/Author default. Resetting discards every label in
+# a set including human-reviewed ones, so an Author who can otherwise manage test
+# sets cannot destroy the team's annotation work.
+ADMIN_ONLY_FIELDS = ("resetTestSetLabels",)
+
 
 def handler(event, context):
     field_name = event["info"]["fieldName"]
@@ -98,9 +103,12 @@ def handler(event, context):
     # not Cognito groups. CI/automation uses IAM credentials; UI users go through AppSync + Cognito.
     is_appsync_invoke = event.get("identity") is not None
     if is_appsync_invoke:
-        allowed_groups = ["Admin", "Author"]
-        if field_name in ANNOTATOR_ALLOWED_FIELDS:
-            allowed_groups.append("Annotator")
+        if field_name in ADMIN_ONLY_FIELDS:
+            allowed_groups = ["Admin"]
+        else:
+            allowed_groups = ["Admin", "Author"]
+            if field_name in ANNOTATOR_ALLOWED_FIELDS:
+                allowed_groups.append("Annotator")
         if not _caller_in_groups(event, tuple(allowed_groups)):
             logger.warning(
                 f"Forbidden: caller attempted '{field_name}' without "
@@ -125,6 +133,8 @@ def handler(event, context):
         return remove_documents_from_test_set(event["arguments"])
     elif field_name == "clearDraftLabels":
         return clear_draft_labels(event["arguments"])
+    elif field_name == "resetTestSetLabels":
+        return reset_test_set_labels(event["arguments"])
     elif field_name == "deleteTestSets":
         return delete_test_sets(event["arguments"])
     elif field_name == "getTestSets":
@@ -1930,6 +1940,131 @@ def clear_draft_labels(args):
         "createdAt": meta.get("createdAt"),
         "lastAddResult": f"Cleared {len(to_delete)} draft label section(s)",
     }
+
+
+def reset_test_set_labels(args):
+    """Return a test set to unlabeled, discarding every label including reviewed ones.
+
+    The destructive counterpart to :func:`clear_draft_labels`, which spares human
+    work by design and therefore cannot return an annotated set to a clean state.
+    Admin-only, and the UI requires the set id to be typed to confirm.
+
+    Five kinds of state have to go together, or the set is left inconsistent:
+
+    * every baseline section, including ``reviewed-human`` and uploaded ground truth
+    * HITL attributes on the pipeline documents of the set's labeling runs —
+      otherwise the queue still reports the set fully reviewed with no labels present
+    * the labeling-job records
+    * the confidence-curve observations, which would otherwise let the next run's
+      estimate claim evidence from labels that no longer exist
+    * ``labelState`` and the label-job pointers on the set's metadata
+
+    Documents under ``{id}/input/`` are never touched: this resets labels, not
+    membership.
+    """
+    test_set_id = args["testSetId"]
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
+
+    meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    test_set_bucket = os.environ["TEST_SET_BUCKET"]
+    paginator = s3_client.get_paginator("list_objects_v2")
+    keys = []
+    for page in paginator.paginate(
+        Bucket=test_set_bucket, Prefix=f"{test_set_id}/baseline/"
+    ):
+        keys.extend(obj["Key"] for obj in page.get("Contents", []))
+
+    for i in range(0, len(keys), 1000):
+        s3_client.delete_objects(
+            Bucket=test_set_bucket,
+            Delete={"Objects": [{"Key": k} for k in keys[i : i + 1000]]},
+        )
+
+    _clear_review_state_for_label_jobs(test_set_id)
+
+    now = f"Reset {len(keys)} label object(s)"
+    db_client.update_item(
+        key={"PK": f"testset#{test_set_id}", "SK": "metadata"},
+        update_expression=(
+            "SET labelState = :u, lastAddResult = :r "
+            "REMOVE labelJobId, labelJobStatus"
+        ),
+        expression_attribute_values={":u": "unlabeled", ":r": now},
+    )
+
+    logger.info(f"Reset {test_set_id}: deleted {len(keys)} baseline object(s)")
+    return {
+        "id": test_set_id,
+        "name": meta.get("name"),
+        "fileCount": _as_int(meta.get("fileCount")) or 0,
+        "status": meta.get("status"),
+        "createdAt": meta.get("createdAt"),
+        "lastAddResult": now,
+    }
+
+
+# HITL attributes written by the review API. Cleared wholesale on reset, since a
+# document whose labels are gone must not still read as reviewed.
+_HITL_ATTRS = (
+    "HITLStatus",
+    "HITLCompleted",
+    "HITLReviewHistory",
+    "HITLSectionsCompleted",
+    "HITLSectionsPending",
+    "HITLSectionsSkipped",
+    "HITLReviewOwner",
+    "HITLReviewOwnerEmail",
+    "HITLReviewedBy",
+    "HITLReviewedByEmail",
+    "HITLPendingReview",
+)
+
+
+def _clear_review_state_for_label_jobs(test_set_id):
+    """Drop review state, labeling jobs and curve observations for a test set.
+
+    Best-effort per item: a document that cannot be updated must not abort the
+    reset and leave the set half-cleared.
+    """
+    tracking_table = boto3.resource("dynamodb").Table(os.environ["TRACKING_TABLE"])
+    items = []
+    start_key = None
+    # Bounded rather than `while True`: a query that keeps returning the same
+    # continuation token would otherwise spin until the Lambda timeout. A test set
+    # carries one metadata item plus a handful of job and curve records, so this
+    # ceiling is far above any real set.
+    for _ in range(100):
+        page = db_client.query(
+            key_condition_expression="PK = :pk",
+            expression_attribute_values={":pk": f"testset#{test_set_id}"},
+            exclusive_start_key=start_key,
+        )
+        items.extend(page.get("Items") or [])
+        next_key = page.get("LastEvaluatedKey")
+        if not next_key or next_key == start_key:
+            break
+        start_key = next_key
+
+    remove_expr = "REMOVE " + ", ".join(_HITL_ATTRS)
+    for item in items:
+        sk = item.get("SK", "")
+        if sk.startswith("labeljob#"):
+            job_id = item.get("jobId")
+            for file_name in item.get("objectKeys") or []:
+                try:
+                    tracking_table.update_item(
+                        Key={"PK": f"doc#{job_id}/{file_name}", "SK": "none"},
+                        UpdateExpression=remove_expr,
+                    )
+                except Exception as e:  # noqa: BLE001 — one doc must not stop the reset
+                    logger.warning(f"Could not clear review state for {file_name}: {e}")
+            db_client.delete_item({"PK": f"testset#{test_set_id}", "SK": sk})
+        elif sk.startswith("curve#"):
+            db_client.delete_item({"PK": f"testset#{test_set_id}", "SK": sk})
 
 
 def _existing_label_is_draft(test_set_bucket, key):

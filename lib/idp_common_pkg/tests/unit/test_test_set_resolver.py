@@ -115,10 +115,33 @@ def _db_client_on(table):
             kwargs["ExpressionAttributeValues"] = expression_attribute_values
         return table.update_item(**kwargs)
 
+    def _delete_item(key):
+        return table.delete_item(Key=key)
+
+    def _query(
+        key_condition_expression,
+        expression_attribute_names=None,
+        expression_attribute_values=None,
+        limit=None,
+        exclusive_start_key=None,
+    ):
+        kwargs = {"KeyConditionExpression": key_condition_expression}
+        if expression_attribute_names:
+            kwargs["ExpressionAttributeNames"] = expression_attribute_names
+        if expression_attribute_values:
+            kwargs["ExpressionAttributeValues"] = expression_attribute_values
+        if limit:
+            kwargs["Limit"] = limit
+        if exclusive_start_key:
+            kwargs["ExclusiveStartKey"] = exclusive_start_key
+        return table.query(**kwargs)
+
     return _MultiPatch(
         patch.object(test_set_index.db_client, "get_item", side_effect=_get_item),
         patch.object(test_set_index.db_client, "put_item", side_effect=_put_item),
         patch.object(test_set_index.db_client, "update_item", side_effect=_update_item),
+        patch.object(test_set_index.db_client, "delete_item", side_effect=_delete_item),
+        patch.object(test_set_index.db_client, "query", side_effect=_query),
     )
 
 
@@ -2509,6 +2532,88 @@ class TestTestSetResolver:
         meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
         assert "labelJobId" not in meta
         assert "labelJobStatus" not in meta
+
+    def test_reset_discards_reviewed_labels_and_review_state(self, labeling_env):
+        """The destructive counterpart to clearDraftLabels.
+
+        clearDraftLabels spares human work by design, so an annotated set cannot be
+        returned to a clean state through it. Reset must remove the labels AND the
+        review state that would otherwise leave the queue reporting the set fully
+        reviewed with no labels present.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        for name, src in (("a.pdf", "reviewed-human"), ("b.pdf", "draft-machine")):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps({"labelSource": src}).encode(),
+            )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#run1",
+                "jobId": "run1",
+                "status": "COMPLETED",
+                "objectKeys": ["a.pdf", "b.pdf"],
+            }
+        )
+        table.put_item(Item={"PK": "testset#ts1", "SK": "curve#_aggregate", "n": 5})
+        table.put_item(
+            Item={
+                "PK": "doc#run1/a.pdf",
+                "SK": "none",
+                "HITLStatus": "Completed",
+                "HITLCompleted": True,
+            }
+        )
+
+        result = test_set_index.reset_test_set_labels({"testSetId": "ts1"})
+
+        # Every label is gone, reviewed included.
+        assert not s3.list_objects_v2(
+            Bucket="test-set-bucket", Prefix="ts1/baseline/"
+        ).get("Contents")
+        # Documents themselves survive — this resets labels, not membership.
+        assert (
+            len(
+                s3.list_objects_v2(Bucket="test-set-bucket", Prefix="ts1/input/")[
+                    "Contents"
+                ]
+            )
+            == 2
+        )
+        # Review state cleared, or the queue still reads the set as reviewed.
+        doc = table.get_item(Key={"PK": "doc#run1/a.pdf", "SK": "none"})["Item"]
+        assert "HITLStatus" not in doc
+        assert "HITLCompleted" not in doc
+        # Label job and calibration history are gone.
+        remaining = table.query(
+            KeyConditionExpression="PK = :pk",
+            ExpressionAttributeValues={":pk": "testset#ts1"},
+        )["Items"]
+        assert [i["SK"] for i in remaining] == ["metadata"]
+        meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
+        assert meta["labelState"] == "unlabeled"
+        assert "labelJobId" not in meta
+        assert "Reset" in result["lastAddResult"]
+
+    def test_reset_is_admin_only(self, labeling_env):
+        """An Author manages test sets but must not be able to discard the team's
+        annotation work."""
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        for group in ("Author", "Annotator", "Viewer"):
+            with pytest.raises(Exception, match="Unauthorized"):
+                test_set_index.handler(
+                    {
+                        "info": {"fieldName": "resetTestSetLabels"},
+                        "identity": {"claims": {"cognito:groups": [group]}},
+                        "arguments": {"testSetId": "ts1"},
+                    },
+                    None,
+                )
 
     def test_queue_sorts_ground_truth_last_and_unlabeled_first(self, labeling_env):
         """Two kinds of "no confidence" must not sort the same.

@@ -764,6 +764,7 @@ export type Mutation = {
    */
   removeFeatureConfigPreset: Scalars['Boolean']['output'];
   reprocessDocument: Scalars['Boolean']['output'];
+  resetTestSetLabels?: Maybe<TestSet>;
   restoreDefaultModelConfigLimits?: Maybe<UpdateModelConfigLimitsResponse>;
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
@@ -1032,6 +1033,11 @@ export type MutationRemoveFeatureConfigPresetArgs = {
 export type MutationReprocessDocumentArgs = {
   objectKeys: Array<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationResetTestSetLabelsArgs = {
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -2342,6 +2348,13 @@ export type ReprocessDocumentMutationVariables = Exact<{
 
 
 export type ReprocessDocumentMutation = { reprocessDocument: boolean };
+
+export type ResetTestSetLabelsMutationVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+}>;
+
+
+export type ResetTestSetLabelsMutation = { resetTestSetLabels?: { id: string, name: string, fileCount?: number | null, status?: string | null, createdAt: string, lastAddResult?: string | null } | null };
 
 export type RestoreDefaultModelConfigLimitsMutationVariables = Exact<{ [key: string]: never; }>;
 

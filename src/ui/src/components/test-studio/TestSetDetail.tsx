@@ -20,7 +20,10 @@ import {
   BreadcrumbGroup,
   Button,
   ContentLayout,
+  ExpandableSection,
+  FormField,
   Header,
+  Input,
   Link,
   Modal,
   Pagination,
@@ -32,9 +35,10 @@ import {
 } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { getTestSetDocuments, generateDraftLabels, getDraftLabelJob, clearDraftLabels } from '../../graphql/generated';
+import { getTestSetDocuments, generateDraftLabels, getDraftLabelJob, clearDraftLabels, resetTestSetLabels } from '../../graphql/generated';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
+import useUserRole from '../../hooks/use-user-role';
 import Navigation from '../genaiidp-layout/navigation';
 import { appLayoutLabels } from '../common/labels';
 import { TEST_STUDIO_PATH, testSetDocumentHref, testSetAnnotateHref } from '../../routes/constants';
@@ -228,7 +232,10 @@ const TestSetDetail = (): React.JSX.Element => {
   const [isStartingLabels, setIsStartingLabels] = useState(false);
   const [showEffortModal, setShowEffortModal] = useState(false);
   const [showLabelModal, setShowLabelModal] = useState(false);
+  const { isAdmin } = useUserRole();
   const [showClearDraftsModal, setShowClearDraftsModal] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
   const [isClearingDrafts, setIsClearingDrafts] = useState(false);
   const [clearedMessage, setClearedMessage] = useState<string | null>(null);
   const [worstFirst, setWorstFirst] = useState(true);
@@ -283,6 +290,28 @@ const TestSetDetail = (): React.JSX.Element => {
   const handlePageChange = (pageIndex: number) => {
     setCurrentPageIndex(pageIndex);
     fetchPage(pageIndex, pageTokens);
+  };
+
+  const handleResetLabels = async () => {
+    setIsResetting(true);
+    setError(null);
+    try {
+      const response = await client.graphql({
+        query: resetTestSetLabels,
+        variables: { testSetId: testSetId ?? '' },
+      });
+      setShowClearDraftsModal(false);
+      setResetConfirmText('');
+      setLabelJob(null);
+      setClearedMessage(response.data?.resetTestSetLabels?.lastAddResult ?? 'All labels reset.');
+      fetchPage(1, [null]);
+      setCurrentPageIndex(1);
+    } catch (err) {
+      logger.error('Error resetting labels:', err);
+      setError('Failed to reset labels. Please try again.');
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const handleClearDraftLabels = async () => {
@@ -643,6 +672,42 @@ const TestSetDetail = (): React.JSX.Element => {
                   Reviewed labels, and any ground truth you uploaded or generated, are kept. Only labels tagged <b>Draft (machine)</b> are
                   removed.
                 </Alert>
+
+                {/* Collapsed by default and Admin-only: a full reset discards the
+                    team's confirmed annotations, so it is deliberately harder to
+                    reach than the safe action above and requires the set id typed
+                    to confirm. */}
+                {isAdmin && (
+                  <ExpandableSection headerText="Advanced" variant="footer">
+                    <SpaceBetween size="s">
+                      <Alert type="warning" header="Reset all labels, including reviewed ones">
+                        This deletes <b>every</b> label in this test set — reviewed and confirmed annotations, uploaded ground truth, the
+                        review history, and the calibration measurements collected from past reviews. The documents themselves are kept. The
+                        test set returns to <b>Unlabeled</b>, as if it had just been created.
+                        <Box variant="p" padding={{ top: 'xs' }}>
+                          There is no undo. Annotation work discarded here cannot be recovered.
+                        </Box>
+                      </Alert>
+                      <FormField
+                        label={
+                          <>
+                            To confirm, type <b>{testSetId}</b>
+                          </>
+                        }
+                      >
+                        <Input
+                          value={resetConfirmText}
+                          onChange={({ detail }) => setResetConfirmText(detail.value)}
+                          placeholder={testSetId}
+                          disabled={isResetting}
+                        />
+                      </FormField>
+                      <Button onClick={handleResetLabels} loading={isResetting} disabled={resetConfirmText !== testSetId}>
+                        Reset all labels
+                      </Button>
+                    </SpaceBetween>
+                  </ExpandableSection>
+                )}
               </SpaceBetween>
             </Modal>
           </SpaceBetween>

@@ -393,6 +393,13 @@ operations:
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: { input: { testSetId: "nonexistent-test-set", objectKey: "__x__" } }
+  resetTestSetLabels:
+    # Admin-only: discards human-reviewed labels, so an Author who can otherwise
+    # manage test sets cannot destroy the team's annotation work.
+    groups: [Admin]
+    kind: mutation
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    args: { testSetId: "nonexistent-test-set" }
   clearDraftLabels:
     groups: [Admin, Author]
     kind: mutation
