@@ -2,20 +2,11 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * GenerateDraftLabelsModal — choose what to label, and with which config.
+ * GenerateDraftLabelsModal — choose what to label, and with which config version.
  *
- * Draft labeling used to be a single button that took no input: it labeled
- * whatever needed labels using the active config. Two things that made
- * unreachable, both of which come up as soon as a run produces something wrong:
- *
- *  - Re-running with a *different* config to compare, or to fix a config
- *    mistake. The API has always accepted configVersion; nothing sent it.
- *  - Re-labeling a chosen subset rather than every unlabeled document.
- *
- * Documents that already carry authored ground truth (uploaded or generated) are
- * shown but not selectable: the server refuses to overwrite them, so offering
- * the choice would imply a capability that does not exist. Prior machine drafts
- * ARE selectable, since replacing a draft is the whole point of re-running.
+ * Documents carrying authored ground truth (uploaded or generated) are listed but
+ * not selectable, because the server refuses to overwrite them. Prior machine
+ * drafts are selectable: replacing a draft is the point of re-running.
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -68,9 +59,8 @@ const GenerateDraftLabelsModal = ({ visible, testSetId, documents, onDismiss, on
 
   const labelable = useMemo(() => documents.filter((d) => !isProtected(d)), [documents]);
   const protectedCount = documents.length - labelable.length;
-  // Count against whatever will actually be submitted. Keying this on `selected`
-  // alone meant the warning never appeared in the default "label everything"
-  // mode — which is precisely the path that silently replaces existing drafts.
+  // Must track what will actually be submitted: in select-all mode `selected` is
+  // empty, so keying the replace-warning on it would hide the warning.
   const targeted = selectAll ? labelable : selected;
   const redoCount = useMemo(() => targeted.filter((d) => d.labelSource === 'draft-machine').length, [targeted]);
 
@@ -106,9 +96,8 @@ const GenerateDraftLabelsModal = ({ visible, testSetId, documents, onDismiss, on
 
   const effectiveKeys = selectAll ? undefined : selected.map((d) => d.objectKey);
   const targetCount = selectAll ? labelable.length : selected.length;
-  // Cloudscape types Option.value as `string | undefined`, so a bare ternary on
-  // it can yield a non-string. One run reached the backend with
-  // configVersion=true, which then pinned the run to a version named "True".
+  // Option.value is `string | undefined`, so the type guard is required: a
+  // non-string reaching the API pins the run to a bogus config version.
   const rawConfigVersion = configVersion.value;
   const selectedConfigVersion = typeof rawConfigVersion === 'string' && rawConfigVersion !== ACTIVE_CONFIG ? rawConfigVersion : undefined;
 

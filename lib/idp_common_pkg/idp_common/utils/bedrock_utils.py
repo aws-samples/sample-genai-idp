@@ -37,16 +37,11 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 # Default retryable error codes (matched against ClientError codes and exception
 # messages).
 #
-# Matching is CASE-INSENSITIVE (both decorators fold case before comparing, via
-# _DEFAULT_RETRYABLE_ERRORS_LOWER). Bedrock's streaming APIs
-# report the same condition with a lower-cased first letter — ConverseStream
-# raises "internalServerException" where Converse raises
-# "InternalServerException" — so a case-sensitive set silently fails to retry a
-# transient streaming error. That surfaced live as synthetic generation dying on
-# "(internalServerException) ... Try your request again" without a single retry,
-# even though the non-streaming spelling was listed. Keeping one spelling per
-# condition here and folding case at comparison time avoids having to guess which
-# variants a given API emits.
+# Matching is CASE-INSENSITIVE: Bedrock's streaming APIs report the same condition
+# with a lower-cased first letter (ConverseStream raises
+# "internalServerException" where Converse raises "InternalServerException"), so a
+# case-sensitive set silently fails to retry transient streaming errors. List one
+# spelling per condition here; both decorators fold case before comparing.
 DEFAULT_RETRYABLE_ERRORS = {
     "ThrottlingException",
     "ModelThrottledException",  # Strands wrapper for throttling
@@ -75,8 +70,7 @@ DEFAULT_RETRYABLE_ERRORS = {
     "AWSHTTPSConnectionPool",
 }
 
-# Pre-folded for case-insensitive comparison (see the note on
-# DEFAULT_RETRYABLE_ERRORS about streaming vs non-streaming spellings).
+# Pre-folded for case-insensitive comparison.
 _DEFAULT_RETRYABLE_ERRORS_LOWER = {err.lower() for err in DEFAULT_RETRYABLE_ERRORS}
 
 # Default retryable exception types (caught by isinstance check)
@@ -145,9 +139,6 @@ def async_exponential_backoff_retry[T, **P](
                         not in e.response.get("Error", {}).get("Message", "")
                     ):
                         raise
-                    # Case-insensitive: streaming APIs lower-case the first letter
-                    # of the same condition (internalServerException vs
-                    # InternalServerException).
                     if (
                         error_code is None
                         or error_code.lower() not in retryable_lower
@@ -306,16 +297,10 @@ def exponential_backoff_retry[T, **P](
                         not in e.response.get("Error", {}).get("Message", "")
                     ):
                         raise
-                    # Shares DEFAULT_RETRYABLE_ERRORS with the async decorator.
-                    # This list used to be a narrower hardcoded four
-                    # (Throttling/ModelError/Validation) that omitted
-                    # InternalServerException entirely — and since converse_stream
-                    # is wrapped by *this* decorator, a transient Bedrock
-                    # internalServerException failed the caller on the first
-                    # attempt. That surfaced as synthetic generation dying on
-                    # "Try your request again" with no retry at all.
-                    # Case-insensitive because the streaming APIs lower-case the
-                    # first letter of the same condition.
+                    # Shares DEFAULT_RETRYABLE_ERRORS with the async decorator so
+                    # both paths retry the same conditions; converse_stream is
+                    # wrapped here, so any streaming-only spelling omitted from
+                    # that set fails the caller on the first attempt.
                     if (
                         error_code is None
                         or error_code.lower() not in _DEFAULT_RETRYABLE_ERRORS_LOWER

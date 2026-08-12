@@ -1,38 +1,32 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-"""Confidence→accuracy curve: the engine behind the review-effort estimator.
+"""Confidence→accuracy curve behind the review-effort estimator.
 
 The estimator answers "how many documents must a human review to reach 99%
-accuracy?" That number is only meaningful if we know ``P(correct | confidence)``
-for *this* test set — the probability that a field labeled at a given confidence
-is actually right. This module owns that curve: its representation, how it is
-built from observations, how it blends with a prior when observations are
-scarce, and the estimate it produces.
+accuracy?" That number is only meaningful given ``P(correct | confidence)`` for
+*this* test set. This module owns that curve: its representation, how it is built
+from observations, how it blends with a prior when observations are scarce, and
+the estimate it produces.
 
-**Why a reliability table rather than a fitted model.** The curve is stored as
-per-bin empirical accuracy — the same shape Stickler's ``ECEMetric`` emits. It is
-explainable (you can show a user the bins), needs no inference-time dependency,
-serializes to a few hundred bytes of DynamoDB, and composes additively: folding
-in new observations is incrementing two counters per bin, which is what makes the
-self-correcting updater cheap and idempotent-friendly. Isotonic regression would
-be smoother but requires refitting over retained raw observations.
+The curve is stored as per-bin empirical accuracy — the same shape Stickler's
+``ECEMetric`` emits. It is explainable (the bins can be shown to a user), needs
+no inference-time dependency, serializes to a few hundred bytes, and composes
+additively: folding in new observations is incrementing two counters per bin.
+Isotonic regression would be smoother but requires refitting over retained raw
+observations.
 
-**The load-bearing assumption, and where it fails.** Everything here rests on low
-confidence implying a likely error, monotonically. That is a standard modeling
-assumption (it underpins active learning), not a guarantee. Two failure modes are
-dangerous enough to detect explicitly rather than assume away:
+Everything here assumes low confidence implies a likely error, monotonically.
+Two failure modes break that assumption and are detected explicitly:
 
 1. *Overconfidence* — the model is wrong **and** confident, so errors hide in the
-   high-confidence zone that worst-first review never visits. The estimator
-   cannot see these by construction, so it will happily certify a set that is
-   not accurate. ``calibration_health`` reports the ECE that reveals this, and
-   ``audit_sample_size`` reserves review budget for a random sample of the
-   high-confidence zone — the only way to catch it.
-2. *Degenerate confidence* — every field scores ~0.9, so there is no worst-first
-   signal and the ordering is arbitrary. Note that ECE is near-zero here (a
-   single bin is trivially well-calibrated), so ECE alone does **not** catch it;
-   ``bin_coverage`` is tracked separately for exactly this reason.
+   high-confidence zone worst-first review never visits. The estimator cannot see
+   these by construction, so ``calibration_health`` reports the ECE that reveals
+   them and ``audit_sample_size`` reserves review budget for a random sample of
+   that zone.
+2. *Degenerate confidence* — every field scores ~0.9, so worst-first ordering is
+   arbitrary. ECE is near-zero here (a single bin is trivially well-calibrated),
+   so ``bin_coverage`` is tracked separately.
 
 Both surface through ``EstimateConfidence`` so a caller can weaken or refuse the
 numbers rather than presenting a prior-driven guess as measurement.
@@ -49,17 +43,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 logger = logging.getLogger(__name__)
 
 # Ten fixed 0.1-wide bins, matching Stickler's ECEMetric bin edges so its output
-# folds in without rebinning (and so a reliability table shown in the UI lines up
-# with the ECE bins shown next to it).
+# folds in without rebinning.
 BIN_COUNT = 10
 BIN_WIDTH = 1.0 / BIN_COUNT
 
-# Blending: how many observations in a bin before the measured rate fully
-# displaces the prior. Below this the two are blended proportionally, so a bin
-# with 2 observations doesn't swing the estimate on noise. This is Bayesian
-# shrinkage with a fixed pseudo-count; 20 is a judgment call, chosen so a
-# typical worst-first review pass (tens of fields in the low-confidence bins)
-# starts to dominate the prior while a handful of reviews does not.
+# Bayesian shrinkage pseudo-count: observations in a bin before the measured rate
+# fully displaces the prior. Below this the two blend proportionally, so a bin
+# with 2 observations doesn't swing the estimate on noise.
 PRIOR_STRENGTH = 20.0
 
 # Below this many total observations the curve is reported as prior-driven
@@ -74,10 +64,8 @@ MIN_BINS_FOR_SIGNAL = 3
 # and recommend reviewing everything instead of a small worst-first sample.
 ECE_UNRELIABLE_THRESHOLD = 0.15
 
-# Quality tiers. A tier is a claim about a test set's *label* accuracy, so it must
-# be earnable and losable from measurement rather than asserted by a user —
-# otherwise it is decoration. Expressed as accuracy (1 - baseline_error) because
-# that is the question a tier answers: "how good is this ground truth?"
+# Quality tiers, expressed as label accuracy (1 - baseline_error). A tier is
+# earned from measurement, never asserted by a user.
 GOLD_ACCURACY = 0.99
 SILVER_ACCURACY = 0.95
 
@@ -85,17 +73,17 @@ SILVER_ACCURACY = 0.95
 class QualityTier(str, Enum):
     """A test set's label-quality tier, derived from its measured curve.
 
-    Deliberately not a user-set field. GOLD requires the curve to be genuinely
-    measured on this set, because a 99% figure computed from a cross-set prior is
-    not evidence about *these* labels.
+    Deliberately not a user-set field. GOLD requires the curve to be measured on
+    this set, because a 99% figure computed from a cross-set prior is not evidence
+    about *these* labels.
     """
 
     GOLD = "gold"
     SILVER = "silver"
     BRONZE = "bronze"
     # Confidence cannot be trusted to rank correctness here (degenerate, or
-    # worse-than-chance ranking), so no accuracy claim is defensible — the case a
-    # badge must refuse to dress up as Bronze.
+    # worse-than-chance ranking), so no accuracy claim is defensible. Distinct
+    # from BRONZE, which is a low-but-meaningful claim.
     UNRATED = "unrated"
 
 
@@ -121,33 +109,30 @@ TIER_EXPLANATIONS = {
 
 
 # AUROC below which confidence cannot usefully *rank* correctness, which is the
-# only thing worst-first review needs from it. 0.5 is chance; anything at or
-# under this is no better than reviewing at random.
+# only thing worst-first review needs from it. 0.5 is chance; anything at or under
+# this is no better than reviewing at random.
 #
-# This is a separate gate from ECE because the two measure different things and
-# can disagree completely. Measured on a 100-document W-2 set: one grader scored
-# ECE 0.032 / AUROC 0.480 and another ECE 0.054 / AUROC 0.878 — the *worse* ECE
-# had the far better ranking, and the ECE-only gate called the useless one
-# reliable. Calibration says "is 0.9 really 90%?"; discrimination says "are the
-# wrong answers the ones with low scores?". Only the latter justifies reviewing a
-# subset.
+# A separate gate from ECE, because the two can disagree completely: calibration
+# asks "is 0.9 really 90%?" while discrimination asks "are the wrong answers the
+# ones with low scores?". A well-calibrated grader can rank at chance level, and
+# only ranking justifies reviewing a subset.
 AUROC_UNRELIABLE_THRESHOLD = 0.55
 
 # Enough observations to trust an AUROC estimate at all. Below this the ranking
-# statistic is noise and the gate would fire on small samples that are simply
-# thin rather than genuinely undiscriminating.
+# statistic is noise and the gate would fire on samples that are merely thin
+# rather than genuinely undiscriminating.
 MIN_OBSERVATIONS_FOR_AUROC = 100
 
-# Default effort model. Deliberately a flat heuristic: it ignores field
-# complexity, document variance and annotator speed. Real per-annotator timings
-# should replace this once claim→complete durations are being recorded.
+# Default effort model: a flat heuristic that ignores field complexity, document
+# variance and annotator speed. Replace with real per-annotator timings once
+# claim→complete durations are recorded.
 DEFAULT_SECONDS_PER_FIELD = 14.0
 DEFAULT_SECONDS_PER_PAGE = 20.0
 DEFAULT_FIELDS_PER_DOC = 12.0
 DEFAULT_PAGES_PER_DOC = 2.4
 
-# Upper bound on the high-confidence audit sample. See _audit_sample_size for
-# the detection-power reasoning behind 30.
+# Upper bound on the high-confidence audit sample. See _audit_sample_size for the
+# detection-power reasoning behind 30.
 AUDIT_SAMPLE_TARGET = 30
 
 
@@ -226,20 +211,19 @@ class CalibrationHealth:
 
 @dataclass
 class ConfidenceCurve:
-    """A reliability table over confidence bins, plus the prior it blends with.
+    """A reliability table over confidence bins.
 
     ``correct[i]`` / ``total[i]`` are raw counts for bin ``i``, so folding in new
-    observations is pure addition and the curve can be rebuilt from, or merged
-    with, any other curve over the same bins.
+    observations is pure addition and the curve can be merged with any other curve
+    over the same bins.
     """
 
     correct: List[float] = field(default_factory=lambda: [0.0] * BIN_COUNT)
     total: List[float] = field(default_factory=lambda: [0.0] * BIN_COUNT)
-    # Optional identity, so a curve is never reused across a config change that
-    # shifts what confidence means.
+    # Identity, so a curve is never reused across a config change that shifts what
+    # confidence means.
     test_set_id: Optional[str] = None
     config_version: Optional[str] = None
-    # Provenance of the observations folded in so far.
     review_observations: int = 0
     scoring_observations: int = 0
 
@@ -258,9 +242,9 @@ class ConfidenceCurve:
     ) -> int:
         """Fold ``(confidence, correct)`` pairs in. Returns the count accepted.
 
-        Non-finite or out-of-range confidences are dropped rather than clamped:
-        a confidence of NaN or 5.0 signals an upstream bug, and silently binning
-        it would corrupt the curve in a way that is very hard to trace back.
+        Non-finite or out-of-range confidences are dropped rather than clamped: a
+        confidence of NaN or 5.0 signals an upstream bug, and binning it silently
+        would corrupt the curve in a way that is hard to trace back.
         """
         accepted = 0
         for confidence, correct in observations:
@@ -291,8 +275,8 @@ class ConfidenceCurve:
         """Fold in Stickler ``ECEMetric`` bins from a scoring run.
 
         A scoring run measures correctness across the *whole* confidence range,
-        including the high-confidence zone that worst-first review never reaches
-        — so this is the highest-fidelity source the curve has.
+        including the high-confidence zone worst-first review never reaches, so
+        this is the highest-fidelity source the curve has.
         """
         accepted = 0
         for entry in bins or []:
@@ -330,12 +314,10 @@ class ConfidenceCurve:
     ) -> float:
         """``P(correct | confidence)``, blended with a prior when data is thin.
 
-        With few observations in a bin the measured rate is noise, so it is
-        shrunk toward the prior with weight ``n / (n + PRIOR_STRENGTH)``. With no
-        prior available the fallback is the bin's own confidence value — i.e.
-        "assume the model's confidence is honest", which is the most neutral
-        assumption we can make and is exactly what a perfectly calibrated model
-        would give.
+        With few observations in a bin the measured rate is noise, so it is shrunk
+        toward the prior with weight ``n / (n + PRIOR_STRENGTH)``. With no prior
+        available the fallback is the bin's own confidence value — what a perfectly
+        calibrated model would give, and the most neutral assumption available.
         """
         index = bin_index(confidence)
         observed_n = self.total[index]
@@ -355,7 +337,7 @@ class ConfidenceCurve:
     def reliability_table(
         self, prior: Optional["ConfidenceCurve"] = None
     ) -> List[Dict[str, Any]]:
-        """Per-bin view for display: the curve users can actually inspect."""
+        """Per-bin view for display."""
         table = []
         for index in range(BIN_COUNT):
             total = self.total[index]
@@ -397,14 +379,13 @@ class ConfidenceCurve:
         degenerate = (
             coverage < MIN_BINS_FOR_SIGNAL and total >= MIN_OBSERVATIONS_FOR_MEASURED
         )
-        # Overconfident: mass sits in high-confidence bins whose observed
-        # accuracy is materially worse than claimed — the dangerous quadrant.
+        # Overconfident: mass sits in high-confidence bins whose observed accuracy
+        # is materially worse than claimed.
         overconfident = (
             error > ECE_UNRELIABLE_THRESHOLD and self._high_confidence_error() > 0.1
         )
-        # Undiscriminating: confidence does not rank correctness. This is the
-        # failure ECE and bin coverage both miss — spread-out, well-calibrated
-        # scores that nonetheless put the errors in the high-confidence end.
+        # Undiscriminating: the failure ECE and bin coverage both miss — spread-out,
+        # well-calibrated scores that still put the errors at the confident end.
         auroc = self.auroc()
         undiscriminating = (
             auroc is not None
@@ -425,22 +406,20 @@ class ConfidenceCurve:
     def auroc(self) -> Optional[float]:
         """P(a wrong field scores lower than a correct one), from bin counts.
 
-        The probability that a randomly chosen incorrect field has lower
-        confidence than a randomly chosen correct one — exactly what worst-first
-        review depends on, and what ECE does not measure.
+        The probability that a randomly chosen incorrect field has lower confidence
+        than a randomly chosen correct one — what worst-first review depends on,
+        and what ECE does not measure.
 
-        Computed from the binned counts we already store rather than raw pairs,
-        so it needs no extra state. Ties inside a bin contribute 0.5, which is the
-        standard treatment and the reason a single-bin curve scores 0.5 (chance)
-        instead of appearing perfect. Returns None when either class is absent —
-        with no errors, or nothing correct, ranking is undefined rather than good.
+        Computed from the stored bin counts rather than raw pairs, so it needs no
+        extra state. Ties inside a bin contribute 0.5, which is why a single-bin
+        curve scores 0.5 (chance) instead of appearing perfect. Returns None when
+        either class is absent, since ranking is then undefined rather than good.
 
         Binning discards within-bin ordering, so this reads *lower* than an AUROC
-        over raw confidences (measured: 0.742 here vs 0.878 from Stickler's
-        unbinned ``AUROCMetric`` on the same run). That bias is one-directional
-        and therefore safe for a reliability gate — it can call a good ranker
-        mediocre, but it will not call a chance-level ranker good. Use Stickler's
-        value when reporting AUROC as a metric; use this one for the gate.
+        over raw confidences. The bias is one-directional and therefore safe for a
+        reliability gate: it can call a good ranker mediocre, but will not call a
+        chance-level ranker good. Use Stickler's unbinned ``AUROCMetric`` when
+        reporting AUROC as a metric; use this one for the gate.
         """
         correct_per_bin = [self.correct[i] for i in range(BIN_COUNT)]
         wrong_per_bin = [self.total[i] - self.correct[i] for i in range(BIN_COUNT)]
@@ -462,8 +441,8 @@ class ConfidenceCurve:
     def _high_confidence_error(self) -> float:
         """Confidence-minus-accuracy gap in the top three bins (>=0.7).
 
-        This is the zone worst-first review never reaches, so a gap here is the
-        signal that errors are hiding where the estimator cannot see them.
+        Worst-first review never reaches this zone, so a gap here means errors are
+        hiding where the estimator cannot see them.
         """
         weighted, mass = 0.0, 0.0
         for index in range(7, BIN_COUNT):
@@ -534,8 +513,8 @@ def quality_tier(
 
     Gated on *measurement*, not just on the number: a 99% accuracy computed from a
     cross-set prior says nothing about these labels, so it cannot earn GOLD. An
-    unreliable curve is UNRATED rather than a low tier, because the problem is
-    that the estimate means nothing — not that the labels are bad.
+    unreliable curve is UNRATED rather than a low tier, because the estimate means
+    nothing — it is not evidence that the labels are bad.
     """
     if not calibration.reliable:
         return QualityTier.UNRATED
@@ -553,7 +532,7 @@ def quality_tier(
 
 @dataclass
 class ReviewEstimate:
-    """What the estimator tells a user, plus how much to trust it."""
+    """The estimator's output, plus how much to trust it."""
 
     docs_to_review: int
     total_docs: int
@@ -564,8 +543,6 @@ class ReviewEstimate:
     estimate_confidence: EstimateConfidence
     audit_sample_size: int
     calibration: CalibrationHealth
-    # Range rather than a point when the curve is prior-driven, so the UI can
-    # avoid implying precision the data doesn't support.
     docs_to_review_low: int
     docs_to_review_high: int
     recommend_review_all: bool
@@ -600,19 +577,16 @@ class ReviewEstimate:
 def _audit_sample_size(reviewed: int, auto_accepted: int) -> int:
     """How many high-confidence documents to spot-check at random.
 
-    Worst-first review is blind to confident errors by construction, so a
-    published set can be certified accurate while the auto-accepted zone is
-    quietly wrong. A small random sample from that zone is the only way to catch
-    it — and it doubles as the only source of observations for the
-    high-confidence end of the curve, which review alone never populates.
+    Worst-first review is blind to confident errors by construction, so a set can
+    be certified accurate while the auto-accepted zone is quietly wrong. A small
+    random sample from that zone is the only way to catch it, and the only source
+    of observations for the high-confidence end of the curve.
 
     Sized for *detection power*, not as a fraction of review depth: ~30 samples
     gives a better-than-even chance of seeing at least one error if 2%+ of the
-    auto-accepted zone is wrong (1 - 0.98^30 ≈ 45%), which is the scale of
-    problem worth halting a publish over. Scaling with review depth instead
-    would be backwards — the case that most needs auditing is the one where
-    almost nothing was reviewed, and that is exactly where a
-    proportional-to-reviewed sample would shrink to nothing.
+    auto-accepted zone is wrong (1 - 0.98^30 ≈ 45%). Scaling with review depth
+    would be backwards, because the case most needing an audit is the one where
+    almost nothing was reviewed.
 
     Capped at 30 (and at 10% of the pool for small pools) so it stays cheap
     insurance rather than a second review pass.
@@ -642,10 +616,9 @@ def estimate_for_target(
     error over the *unreviewed* remainder. The answer is the smallest ``N`` whose
     residual error meets the target.
 
-    ``doc_confidences`` is the per-document minimum confidence (what the detail
-    page sorts by). Without it the estimate falls back to spreading documents
-    evenly across the curve, which is far cruder — the caller should pass real
-    values whenever it has them.
+    ``doc_confidences`` is the per-document minimum confidence. Without it the
+    estimate falls back to spreading documents evenly across the curve, which is
+    far cruder, so callers should pass real values whenever they have them.
 
     ``target_accuracy`` is a percentage (99.0), matching the UI slider.
     """
@@ -674,12 +647,10 @@ def estimate_for_target(
     # most.
     if doc_confidences:
         confidences = sorted((-1.0 if c is None else float(c)) for c in doc_confidences)
-        # The set may be larger than the sample the caller could afford to read
-        # (the queue/estimator cap reads a bounded page). Extrapolate the observed
-        # distribution over the rest instead of leaving them unrepresented:
-        # without this a 2008-document set sampled at 500 padded the remaining
-        # 1508 with the "no confidence" sentinel, which sorts to the front and
-        # suppressed impliedCutoff and every burndown cutoff to null.
+        # Callers read a bounded page, so the set may be larger than the sample.
+        # Extrapolate the observed distribution over the remainder rather than
+        # padding with the "no confidence" sentinel, which sorts to the front and
+        # would suppress impliedCutoff and every burndown cutoff to null.
         if len(confidences) < total_docs:
             measured = [c for c in confidences if c >= 0]
             if measured:
@@ -748,8 +719,7 @@ def estimate_for_target(
     )
     auto_accepted = total_docs - docs_to_review
     audit = _audit_sample_size(docs_to_review, auto_accepted)
-    # The audit sample is real review work, so its cost belongs in the estimate
-    # rather than being quietly excluded to make the headline number smaller.
+    # The audit sample is real review work, so its cost belongs in the estimate.
     seconds += audit * (
         fields_per_doc * seconds_per_field + pages_per_doc * seconds_per_page
     )
@@ -757,9 +727,9 @@ def estimate_for_target(
     estimate_confidence = curve.assess_estimate_confidence()
     calibration = curve.calibration_health()
 
-    # Uncertainty band. A prior-driven estimate could be substantially wrong in
-    # either direction, so widen the range rather than implying a point value;
-    # it tightens as observations accumulate.
+    # Uncertainty band, tightening as observations accumulate: a prior-driven
+    # estimate can be substantially wrong in either direction, so it is reported as
+    # a range rather than a point value.
     spread = {
         EstimateConfidence.PRIOR: 0.5,
         EstimateConfidence.PARTIALLY_MEASURED: 0.25,

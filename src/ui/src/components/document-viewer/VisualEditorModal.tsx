@@ -713,11 +713,10 @@ const VisualEditorModal = ({
 
   // Extract inference results and page IDs from local data for immediate UI updates
   const inferenceResult = localJsonData?.inference_result || localJsonData?.inferenceResult || localJsonData;
-  // Memoized because both are dependencies of PageImageViewer's image-load
-  // effect: a fresh array identity on every render would re-run the presigning
-  // loop continuously. (`sectionData` itself is rebuilt inline by SectionsPanel on
-  // each render, so keying on its PageIds content rather than its identity is what
-  // makes this stable.)
+  // Both feed PageImageViewer's image-load effect, so a fresh array identity on
+  // every render would re-run the presigning loop continuously. `sectionData` is
+  // rebuilt inline by its parent each render, hence keying on the PageIds content
+  // rather than the object identity.
   const pageIdsKey = JSON.stringify(sectionData?.PageIds ?? []);
   const pageIds = useMemo(
     () => (sectionData?.PageIds as Array<string | number>) || [],
@@ -728,7 +727,7 @@ const VisualEditorModal = ({
       pageIds.map((pageId: string | number) => ({
         Id: String(pageId),
         // Pages hang off the DOCUMENT, not the section — the section only names
-        // its page ids. This is where the previous inline loader read them from.
+        // its page ids.
         ImageUri: (sectionDocItem?.pages as Record<string, unknown>[] | undefined)?.find((p) => String(p.Id) === String(pageId))
           ?.ImageUri as string | undefined,
       })),
@@ -736,8 +735,8 @@ const VisualEditorModal = ({
   );
   const pageIdStrings = useMemo(() => pageIds.map(String), [pageIds]);
 
-  // Reset per-document view state when the modal closes. Image loading itself now
-  // belongs to PageImageViewer, which presigns and caches per page id.
+  // Reset per-document view state when the modal closes. Image loading belongs to
+  // PageImageViewer, which presigns and caches per page id.
   useEffect(() => {
     if (!visible) {
       setCurrentPage(null);
@@ -776,12 +775,8 @@ const VisualEditorModal = ({
   };
 
   /**
-   * Double-click a field to zoom in on it.
-   *
-   * The zoom-and-center calculation used to live here, duplicated line-for-line
-   * from PageImageViewer.zoomToField. Now it just sets the active geometry: the
-   * viewer is passed zoomToFieldOnFocus, so it does the zooming — one copy of the
-   * maths instead of two that could drift.
+   * Double-click a field to zoom in on it. Only sets the active geometry; the
+   * viewer is passed zoomToFieldOnFocus and owns the zoom-and-center calculation.
    */
   const handleFieldDoubleClick = (geometry: Record<string, unknown> | null) => {
     logger.debug('VisualEditorModal - handleFieldDoubleClick called with geometry:', geometry);
@@ -959,13 +954,9 @@ const VisualEditorModal = ({
                   width: '100%',
                 }}
               >
-                {/* Left side - Page images. Uses the shared PageImageViewer,
-                    which owns page navigation, zoom, pan and bounding-box overlay.
-                    This pane used to be a 240-line inline reimplementation of that
-                    same component — same presigning, same BoundingBox, same
-                    auto-centering maths — which is the duplication Spencer meant by
-                    "there is no need for a separate annotation UI": two editors
-                    whose image panes had to be fixed twice. */}
+                {/* Left side - Page images. Uses the shared PageImageViewer, which
+                    owns page navigation, zoom, pan and bounding-box overlay, so this
+                    editor and the annotation editor share one image pane. */}
                 <div
                   style={{
                     width: '50%',
@@ -986,8 +977,7 @@ const VisualEditorModal = ({
                       onPageChange={(pageId) => setCurrentPage(pageId)}
                       height="550px"
                       // Human review zooms to the field being edited rather than
-                      // only outlining it; that behaviour lived here and would
-                      // otherwise be lost in the move.
+                      // only outlining it.
                       zoomToFieldOnFocus
                     />
                   </Container>

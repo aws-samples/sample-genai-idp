@@ -4,16 +4,10 @@
 /**
  * A brief confetti burst when an annotator finishes a document.
  *
- * Spencer asked for "a little bit of whimsy... just some small effect of like
- * congratulations, you did it", explicitly bounded: "whatever Claude can do in 15
- * minutes that does not complicate your life and make a bug". So: no dependency,
- * no canvas, no animation library — CSS keyframes on a handful of absolutely
- * positioned divs that unmount themselves when the animation ends.
- *
- * Annotation is repetitive work measured in hundreds of documents, which is the
- * case for a reward signal rather than against one. It is also pointer-events:
- * none and honours prefers-reduced-motion, so it cannot get in the way of the
- * next document or trigger anyone's motion sensitivity.
+ * No dependency, canvas or animation library: CSS keyframes on a few absolutely
+ * positioned divs that unmount when the animation ends. Renders with
+ * pointer-events: none and honours prefers-reduced-motion, so it cannot block the
+ * next document or trigger motion sensitivity.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -25,9 +19,8 @@ const PIECE_COUNT = 14;
 const COLORS = ['#037f0c', '#0972d3', '#8c4fff', '#f89256', '#e07941'];
 
 /**
- * Precomputed pieces. Deterministic rather than Math.random: an even fan reads as
- * deliberate, repeated bursts stay visually consistent, and each piece gets a
- * stable identity.
+ * Precomputed pieces. Deterministic rather than Math.random so repeated bursts
+ * look identical and each piece has a stable key.
  */
 const PIECES = Array.from({ length: PIECE_COUNT }, (_, i) => ({
   id: `piece-${i}`,

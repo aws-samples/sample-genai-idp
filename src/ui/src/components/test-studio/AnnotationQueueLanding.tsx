@@ -5,10 +5,9 @@
  * AnnotationQueueLanding — where an annotator assigned to more than one test set
  * chooses which queue to work. Route: /test-studio/annotate
  *
- * A single-set annotator never sees this: the navigation links them straight into
- * their queue ("one link, one queue"). It also handles the two states that would
- * otherwise dead-end an annotator with no explanation — scope not yet resolved,
- * and no sets assigned at all.
+ * Navigation links a single-set annotator straight into their queue, so they never
+ * see this page. It also handles the two states that would otherwise dead-end an
+ * annotator: scope not yet resolved, and no sets assigned.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -53,14 +52,7 @@ const AnnotationQueueLanding = (): React.JSX.Element => {
 
   const sets = allowedTestSets ?? [];
 
-  /**
-   * Per-set progress, so choosing a queue is not blind.
-   *
-   * A card showing only the set id gives an annotator with several assignments no
-   * way to tell which needs attention — or that a set has no labels yet and would
-   * dead-end them on arrival. getAnnotationQueue already returns shared progress
-   * and label-job state, and Annotators are permitted to call it.
-   */
+  /** Per-set progress and label-job state, so choosing a queue is not blind. */
   const [summaries, setSummaries] = useState<Record<string, QueueSummary>>({});
 
   const loadSummaries = useCallback(async (ids: string[]) => {
@@ -69,8 +61,7 @@ const AnnotationQueueLanding = (): React.JSX.Element => {
         try {
           const response = await client.graphql({
             query: getAnnotationQueue,
-            // A single row is enough: the counts are set-level, and pulling the
-            // whole queue for every assigned set would be wasteful here.
+            // One row is enough: the counts this page needs are set-level.
             variables: { testSetId: id, limit: 1 },
           });
           const q = response.data?.getAnnotationQueue;
@@ -87,8 +78,7 @@ const AnnotationQueueLanding = (): React.JSX.Element => {
             },
           }));
         } catch (err) {
-          // A summary that fails to load leaves the card usable — the link still
-          // works, it just shows no progress.
+          // Best-effort: the card's link still works without a summary.
           logger.debug(`Could not load queue summary for ${id}:`, err);
         }
       }),
@@ -130,8 +120,8 @@ const AnnotationQueueLanding = (): React.JSX.Element => {
               </Alert>
             )}
 
-            {/* An annotator with no assigned set is denied every set server-side,
-                so say who can fix it rather than showing an empty list. */}
+            {/* With no assigned set every server-side call is denied, so name who
+                can fix it rather than showing an empty list. */}
             {!loading && canAnnotate && sets.length === 0 && (
               <Alert type="info" header="No test sets assigned yet">
                 Your account has no test sets assigned, so there is nothing to annotate. Ask an administrator to assign you a test set —
@@ -159,8 +149,7 @@ const AnnotationQueueLanding = (): React.JSX.Element => {
                         if (summary.labelJobStatus === 'RUNNING') {
                           return <StatusIndicator type="in-progress">Labeling in progress</StatusIndicator>;
                         }
-                        // Say so here rather than letting them arrive at a queue
-                        // that cannot be worked.
+                        // Flagged here so nobody opens a queue that cannot be worked.
                         if (!summary.hasReviewableWork) {
                           return <Badge color="severity-neutral">Needs labeling first</Badge>;
                         }

@@ -2,25 +2,18 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * AnnotationWorkspace — the scoped, worst-first annotation queue.
+ * AnnotationWorkspace — scoped, worst-first annotation queue.
  * Route: /test-studio/sets/:testSetId/annotate
  *
- * This is where an annotator does their work, and for most of them it is the
- * only page they ever see ("one link, one queue"). The link is safe to share
- * because it only navigates: access is enforced server-side against the caller's
- * allowedTestSets on every operation, so a leaked URL grants nothing.
+ * The URL is safe to share: it only navigates, and every operation is authorized
+ * server-side against the caller's allowedTestSets. Documents are ordered by
+ * confidence-alert count so each review removes the most expected error.
  *
- * Deliberately thin. The annotation surface IS the existing
- * GroundTruthVisualEditor — the same component the owner-facing document detail
- * page uses — and everything genuinely new here is the queue rail, the shared
- * progress banner, and "Save & next". Documents are ordered by confidence-alert
- * count so each review removes the most expected error.
- *
- * Saves route through completeSectionReview rather than the editor's default
- * direct-to-S3 write. That is what engages claim-to-lock, tags the label
- * reviewed-human so a later draft-labeling run won't overwrite it, records the
- * audit trail, and teaches the confidence curve the review-effort estimator
- * learns from.
+ * The annotation surface is the shared GroundTruthVisualEditor, but saves route
+ * through completeSectionReview rather than its default direct-to-S3 write: that
+ * engages claim-to-lock, tags the label reviewed-human so a later draft-labeling
+ * run cannot overwrite it, and feeds the confidence curve the review-effort
+ * estimator reads.
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -112,8 +105,8 @@ const QUEUE_ROWS_PER_PAGE = 20;
 
 const AnnotationWorkspace = (): React.JSX.Element => {
   const { testSetId } = useParams<{ testSetId: string }>();
-  // ?doc= preselects one document, so the list's per-row Annotate action opens
-  // the queue on the document the user was already looking at.
+  // ?doc= preselects one document, so a per-row Annotate link opens the queue on
+  // that document.
   const [searchParams] = useSearchParams();
   const requestedDoc = searchParams.get('doc');
   const { navigationOpen, setNavigationOpen } = useAppContext();
@@ -139,12 +132,10 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   /**
    * What the review is buying, refreshed as documents are completed.
    *
-   * This is the answer to "I annotate the low-confidence documents and nothing
-   * improves". Review does NOT raise a field's confidence — that is the model's
-   * own assessment and the calibration curve reads it, so overwriting it would
-   * destroy the observation. What review improves is the *estimate*: residual
-   * error falls and estimateConfidence moves off `prior` as the curve learns.
-   * None of that was visible anywhere, so the payoff for reviewing was invisible.
+   * Review never rewrites a field's confidence — that is the model's own
+   * assessment and the calibration curve reads it as an observation. What review
+   * improves is the estimate: residual error falls and estimateConfidence moves
+   * off `prior` as the curve learns.
    */
   const [impact, setImpact] = useState<{
     baselineError: number;
@@ -194,9 +185,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           return;
         }
         setQueue(data);
-        // Land on the first document the server says this caller can take,
-        // unless we are already working one — or the URL named one, which is how
-        // the per-document Annotate action in the list arrives here.
+        // Precedence: the document already being worked, then ?doc=, then the
+        // first one the server says this caller can take.
         setSelectedKey((current) => {
           if (preserveSelection && current && data.documents.some((d) => d.objectKey === current)) {
             return current;
@@ -209,7 +199,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
       } catch (err) {
         logger.error('Error loading annotation queue:', err);
         // A scope denial is the expected failure for an unassigned annotator, so
-        // say what to do about it rather than "please try again".
+        // it gets actionable copy rather than "please try again".
         const message = String((err as { errors?: { message?: string }[] })?.errors?.[0]?.message ?? err);
         setError(
           message.includes('Unauthorized')
@@ -233,13 +223,11 @@ const AnnotationWorkspace = (): React.JSX.Element => {
 
   /**
    * Poll while draft labeling runs. Labels are harvested on read, so polling is
-   * what advances the job — without this an annotator who opens the workspace
-   * mid-run watches an empty queue that never fills, because the only other
-   * poller is the owner-facing detail page they cannot open.
+   * what advances the job; an annotator with no other poller open would otherwise
+   * watch a queue that never fills.
    *
-   * Keyed on an explicit tick rather than the labeled count: a long run reports
-   * the same count for minutes at a time, so depending on the count would stop
-   * re-arming the timer and polling would die exactly when it is still needed.
+   * Keyed on an explicit tick, not the labeled count: a long run reports the same
+   * count for minutes, which would stop re-arming the timer.
    */
   useEffect(() => {
     if (!labelJobRunning) return undefined;
@@ -253,12 +241,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const selected = useMemo(() => queue?.documents.find((d) => d.objectKey === selectedKey) ?? null, [queue, selectedKey]);
 
   /**
-   * Select a document for viewing. Deliberately does NOT claim it.
-   *
-   * Opening used to claim automatically, which meant browsing the queue silently
-   * locked documents away from teammates — an annotator who clicked three
-   * documents to see what was in them had taken all three. Viewing is free;
-   * claiming is an explicit act.
+   * Select a document for viewing. Deliberately does NOT claim it: browsing the
+   * queue must not lock documents away from teammates.
    */
   const selectDocument = useCallback((item: QueueItem) => {
     setClaimWarning(null);
@@ -289,11 +273,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   }, [selected, loadQueue]);
 
   /**
-   * Give a claim back without completing the review.
-   *
-   * Without this an abandoned claim was only ever released by the same annotator
-   * finishing it, so a document someone opened and walked away from was stuck for
-   * everyone else.
+   * Give a claim back without completing the review, so an abandoned claim does
+   * not block the document for everyone else.
    */
   const releaseSelected = useCallback(async () => {
     if (!selected?.reviewObjectKey) return;
@@ -312,8 +293,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   }, [selected, loadQueue]);
 
   /**
-   * Persist a reviewed section through the review API. Replaces the editor's
-   * default direct-S3 write so the save claims, tags the label reviewed-human,
+   * Persist a reviewed section through the review API instead of the editor's
+   * default direct-S3 write, so the save claims, tags the label reviewed-human,
    * records provenance, and feeds the confidence curve.
    */
   const handleSave = useCallback(
@@ -336,7 +317,6 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const advanceToNext = useCallback(async () => {
     const current = selectedKey;
     await loadQueue(false);
-    // Each completed review feeds the curve, so the estimate moves as work lands.
     loadImpact();
     setQueue((data) => {
       if (data) {
@@ -348,15 +328,11 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   }, [loadQueue, loadImpact, selectedKey]);
 
   /**
-   * Confirm the draft labels are already correct, with no edits.
-   *
-   * This is the common case in review and it needs to be a first-class action:
-   * "no changes needed" is a *verdict*, not an absence of one. Submitting each
-   * section unchanged through completeSectionReview records it as reviewed, tags
-   * the labels reviewed-human so a later draft run cannot overwrite them, and —
-   * because the curve reads an unchanged field as "the model was right" — teaches
-   * the confidence curve the correct-at-this-confidence half of its signal, which
-   * only ever arrives from a reviewer agreeing.
+   * Confirm the draft labels are already correct, with no edits. "No changes
+   * needed" is a verdict, not an absence of one: submitting each section
+   * unchanged marks it reviewed, tags the labels reviewed-human, and gives the
+   * calibration curve its correct-at-this-confidence signal, which only ever
+   * arrives from a reviewer agreeing.
    */
   const handleConfirmCorrect = useCallback(async () => {
     if (!selected?.reviewObjectKey) return;
@@ -365,9 +341,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
     try {
       const sections = selected.sections ?? [];
       for (const section of sections) {
-        // Sequential rather than parallel: these all mutate the same document
-        // record, and the review API is not written for concurrent section
-        // updates on one object.
+        // Sequential, not parallel: these all mutate the same document record and
+        // the review API does not support concurrent section updates on one object.
 
         await client.graphql({
           query: completeSectionReview,
@@ -411,9 +386,6 @@ const AnnotationWorkspace = (): React.JSX.Element => {
     [advanceToNext],
   );
 
-  // Filter + paginate the rail. A 50-document queue in a fixed-height column is
-  // unusable without them, and the queue is deliberately capped rather than
-  // infinite so these bound what a reviewer scrolls.
   const filteredQueue = useMemo(() => {
     const all = queue?.documents ?? [];
     if (!queueFilter.trim()) return all;
@@ -432,39 +404,28 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const queueLink = `${window.location.origin}/${testSetAnnotateHref(testSetId ?? '')}`;
 
   /**
-   * Per-document actions, rendered in the editor pane's header rather than below
-   * it.
-   *
-   * Spencer: "those buttons belong on the head up top if they're important...
-   * skip to the next document also belongs up top." On a long document the
-   * footer buttons were below the fold, so finishing a document meant scrolling
-   * past every field to find the button that says you are done.
+   * Per-document actions live in the editor pane's header, not below it: on a long
+   * document a footer button is below the fold.
    */
   const documentActions = selected && (
     <SpaceBetween direction="horizontal" size="xs">
       <Button onClick={advanceToNext} disabled={isLoading}>
         Skip to next document
       </Button>
-      {/* Claiming is explicit: opening a document to look at it does not lock it
-          away from teammates. Release gives a claim back without completing the
-          review, so a document someone opened and abandoned is not stuck. */}
       {selected.reviewObjectKey && !selected.claimedByMe && !selected.reviewed && (
         <Button variant="primary" onClick={claimSelected} loading={isClaiming} disabled={isLoading || Boolean(selected.claimedBy)}>
           {selected.claimedBy ? `Claimed by ${selected.claimedBy}` : 'Claim this document'}
         </Button>
       )}
-      {/* Claimed state is a different button, not the same one relabelled —
-          Spencer asked for the color to toggle so the claim is visible at a
-          glance rather than read. */}
+      {/* Claimed state is a separate, differently-styled button rather than the
+          same one relabelled, so the claim reads at a glance. */}
       {selected.claimedByMe && (
         <Button iconName="check" onClick={releaseSelected} loading={isClaiming} disabled={isLoading}>
           Claimed by you — release
         </Button>
       )}
-      {/* The common case: the draft labels are already right, so there is nothing
-          to edit. Without this the reviewer could only "skip", which advances the
-          cursor but never marks the document reviewed — so a correct document
-          could never be completed and the queue never drained. */}
+      {/* Skipping advances the cursor without marking anything reviewed, so a
+          correct document needs this to ever leave the queue. */}
       <Button variant="primary" onClick={handleConfirmCorrect} loading={isConfirming} disabled={isLoading || !selected.reviewObjectKey}>
         Labels are correct — mark reviewed
       </Button>
@@ -475,8 +436,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
     <ContentLayout
       header={
         <SpaceBetween size="xs">
-          {/* Annotator-only users get no breadcrumb trail — the pages it links to
-              are ones they cannot open. */}
+          {/* Annotator-only users get no breadcrumb trail: it links to pages they
+              cannot open. */}
           {!isAnnotatorOnly && (
             <BreadcrumbGroup
               items={[
@@ -503,9 +464,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           >
             Annotate: {testSetId}
           </Header>
-          {/* The whole link, selectable. Spencer: "have the full thing where you
-              can mouse over it and copy" — a copy button alone gives no way to see
-              or verify what is on the clipboard before pasting it into Slack. */}
+          {/* The full link is rendered selectable alongside the copy button so the
+              sharer can verify the URL before pasting it. */}
           {!isAnnotatorOnly && (
             <CopyToClipboard
               variant="inline"
@@ -553,8 +513,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                     <Box variant="awsui-key-label">Evidence</Box>
                     <Box fontSize="heading-m">{impact.totalObservations.toLocaleString()}</Box>
                     <Box fontSize="body-s" color="text-body-secondary">
-                      {/* Named plainly: "prior" means the number comes from other
-                          sets, not this one, and reviewing is what changes that. */}
+                      {/* `prior` means the number comes from other sets, not this
+                          one; reviewing is what changes that. */}
                       {impact.estimateConfidence === 'prior'
                         ? 'measurements — estimate still based on other sets'
                         : `measurements — ${impact.estimateConfidence.replace('-', ' ')} on this set`}
@@ -562,16 +522,16 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                   </div>
                   <div>
                     <Box variant="awsui-key-label">Quality</Box>
-                    {/* Same presentation as the Test Sets list — one vocabulary and
-                        one color map, so a set does not appear to change tier
-                        between screens. */}
+                    {/* Shared renderer with the Test Sets list: one vocabulary and
+                        color map, so a set cannot appear to change tier between
+                        screens. */}
                     {renderQualityTier(impact.qualityTier, impact.qualityTierReason, 1 - impact.baselineError)}
                   </div>
                 </ColumnLayout>
               )}
 
-              {/* Be explicit when the ranking covers only part of the set —
-                  otherwise "worst-first" implies the whole set was ranked. */}
+              {/* Worst-first ordering only ranks the documents inspected so far;
+                  say so when that is a subset. */}
               {queue.inspectedDocs != null && queue.inspectedDocs < queue.totalDocs && (
                 <Box fontSize="body-s" color="text-body-secondary">
                   Ordering covers the {queue.inspectedDocs} documents examined so far, not all {queue.totalDocs}.
@@ -671,8 +631,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                           id: 'meta',
                           content: (item) => (
                             <SpaceBetween direction="horizontal" size="xxs">
-                              {/* Alerts first: it is what the ordering is based on
-                                  and what tells the annotator how much is here. */}
+                              {/* Alerts first: the queue is ordered by this. */}
                               {renderAlertCount(item.alertCount, item.fieldCount, item.minConfidence, item.confidenceThreshold)}
                               {renderLabelSource(item.labelSource)}
                             </SpaceBetween>
@@ -684,12 +643,11 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                             if (item.reviewed) return <StatusIndicator type="success">Reviewed</StatusIndicator>;
                             if (item.claimedByMe) return <Badge color="blue">You have this</Badge>;
                             if (item.claimedBy) return <StatusIndicator type="in-progress">{item.claimedBy}</StatusIndicator>;
-                            // No pipeline copy means nothing to claim — but the reason
-                            // differs and the distinction matters. An unlabeled
-                            // document needs a labeling run; authored ground truth
-                            // needs nothing. Keying only on the missing review key
-                            // labelled BOTH "Ground truth", which contradicted the
-                            // "Unlabeled" badge right above it.
+                            // A missing review key means nothing to claim, but the
+                            // reason differs: an unlabeled document needs a labeling
+                            // run, authored ground truth needs nothing. Keying only
+                            // on the missing key would label both "Ground truth" and
+                            // contradict the Unlabeled badge above.
                             if (!item.reviewObjectKey) {
                               const isUnlabeled = !item.labelSource;
                               return (

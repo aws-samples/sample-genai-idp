@@ -6,15 +6,13 @@
 Supports five roles (Cognito groups): Admin, Author, Reviewer, Annotator, Viewer.
 Users can optionally have allowedConfigVersions for config-version scoping.
 
-**Annotator** is a least-privilege role for ground-truth annotation, typically
-someone onboarded for a single labeling effort (often external). It is scoped by
-``allowedTestSets`` — the test set(s) that user may annotate — and is the axis
-that makes a shareable queue link safe: the link only deep-links, while access is
-gated by the scoped Cognito session, so a leaked URL is useless on its own.
+Annotator is a least-privilege role for ground-truth annotation, scoped by
+``allowedTestSets``. Because access is gated by the scoped Cognito session, a
+shared annotation-queue link only deep-links and is useless on its own.
 
-``allowedTestSets`` is a *different* axis from ``allowedConfigVersions``, not a
-replacement: the former restricts which test set's documents a user may touch,
-the latter which config versions' documents they may see. A user can carry both.
+``allowedTestSets`` and ``allowedConfigVersions`` are independent axes — which
+test sets a user may annotate versus which config versions' documents they may
+see. A user can carry both.
 """
 
 import logging
@@ -192,12 +190,10 @@ def create_user(args):
 def update_user(args):
     """Update a user's scope (config versions and/or test sets). Admin-only.
 
-    Each axis is only touched when the caller *mentions* it, so updating test-set
-    scope does not silently clear config-version scope. Presence in ``args`` is
-    what counts, not truthiness: the UI clears a scope by passing an explicit
-    ``null``/empty list, which must still mean "remove the restriction" — reading
-    these with a plain ``.get()`` would make clearing indistinguishable from
-    omitting and silently strand users on their old scope.
+    Each axis is only touched when ``args`` mentions it, so updating one does not
+    clear the other. Presence matters, not truthiness: an explicit ``null``/empty
+    list means "remove the restriction", which a plain ``.get()`` could not
+    distinguish from omitting the axis.
     """
     user_id = args["userId"]
     config_versions_given = "allowedConfigVersions" in args
@@ -323,8 +319,8 @@ _SCOPE_ATTRIBUTES = ("allowedConfigVersions", "allowedTestSets")
 def user_response_from_item(item):
     """Build the GraphQL ``User`` shape from a DynamoDB user item.
 
-    Every read path must go through this so the scope axes cannot drift between
-    them. Absent axes are omitted rather than returned empty.
+    Every read path goes through this so the scope axes cannot drift between them.
+    Absent axes are omitted rather than returned empty.
     """
     result = {
         "userId": item["userId"],
@@ -357,9 +353,8 @@ def _determine_persona_from_groups(groups):
         return "Author"
     if REVIEWER_GROUP in group_names:
         return "Reviewer"
-    # Annotator outranks Viewer: it can annotate its allowed test sets, whereas
-    # Viewer is read-only. Ordering these wrong would report an annotator as a
-    # Viewer and the UI would hide the queue they were onboarded for.
+    # Annotator outranks Viewer: it may annotate its allowed test sets, where
+    # Viewer is read-only. Reversing the order hides the annotation queue.
     if ANNOTATOR_GROUP in group_names:
         return "Annotator"
     if VIEWER_GROUP in group_names:

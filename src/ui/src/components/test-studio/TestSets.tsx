@@ -127,29 +127,23 @@ const TestSets = (): React.JSX.Element => {
   const addDocsFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   /**
-   * Quality tier per test set, fetched lazily.
-   *
-   * A tier is a claim about label accuracy, so it comes from estimateReviewEffort
-   * (which derives it from the measured curve) rather than being stored on the set
-   * — that keeps it earnable and losable instead of a field someone can assert.
-   * One call per row, which is fine at this scale; if the list grows this wants a
+   * Quality tier per test set, fetched lazily. The tier is derived from the
+   * measured calibration curve by estimateReviewEffort rather than stored on the
+   * set, so it cannot be asserted. One call per row; a larger list would want a
    * batch endpoint.
    */
   const [tiers, setTiers] = useState<Record<string, { tier: string; reason: string; accuracy: number | null }>>({});
 
   /**
-   * Fetch each set's tier once, keyed on the label state it was computed from.
-   *
-   * Deliberately NOT called from loadTestSets: that runs on a 3s poll while any
-   * set is active, so calling it there fired one estimateReviewEffort per labeled
-   * set every tick. Re-fetching only when a set's label state changes is what
-   * makes the tier current without the request storm.
+   * Fetch each set's tier, keyed on the label state it was computed from. Must not
+   * be called from loadTestSets, which runs on a 3s poll: that would fire one
+   * estimateReviewEffort per labeled set every tick.
    */
   const loadTiers = useCallback(async (sets: TestSetItem[]) => {
     const client2 = generateClient();
     await Promise.all(
       sets.map(async (set) => {
-        // Only labeled sets can have a tier — there is nothing to assess otherwise.
+        // Only labeled sets can have a tier; there is nothing to assess otherwise.
         if (!set.labelState || set.labelState === 'unlabeled') return;
         try {
           const response = await client2.graphql({
@@ -163,14 +157,12 @@ const TestSets = (): React.JSX.Element => {
               [set.id]: {
                 tier: est.qualityTier as string,
                 reason: (est.qualityTierReason as string) || '',
-                // The estimated accuracy is the primary signal in the column; the
-                // tier name is shorthand for it and lives in the tooltip.
                 accuracy: typeof est.baselineError === 'number' ? 1 - est.baselineError : null,
               },
             }));
           }
         } catch (err) {
-          // A missing tier is not an error state — the column just stays blank.
+          // A missing tier is not an error state; the column stays blank.
           console.debug(`No quality tier for ${set.id}:`, err);
         }
       }),
@@ -219,10 +211,8 @@ const TestSets = (): React.JSX.Element => {
   }, []);
 
   /**
-   * Refresh tiers when the label state of the listed sets actually changes.
-   *
-   * The signature includes labelJobStatus so a run finishing re-rates the set,
-   * but an ordinary poll tick (which returns identical state) does not.
+   * Signature of the listed sets' label state. Includes labelJobStatus so a run
+   * finishing re-rates the set, while an identical poll tick does not.
    */
   const labelStateSignature = testSets.map((ts) => `${ts.id}:${ts.labelState ?? ''}:${ts.labelJobStatus ?? ''}`).join('|');
 
@@ -231,13 +221,9 @@ const TestSets = (): React.JSX.Element => {
   }, [labelStateSignature, loadTiers]);
 
   /**
-   * Drive any labeling job that is still RUNNING.
-   *
-   * Draft labels are harvested ON READ, so a job only advances while something
-   * polls getDraftLabelJob. This list polls getTestSets, which does not harvest —
-   * so a run watched from here appeared permanently stuck at "Labeling" while the
-   * page looked busy. Observed live: 34 minutes at 0/5 with every document
-   * already COMPLETED, including across a manual page refresh.
+   * Drive any labeling job that is still RUNNING. Draft labels are harvested on
+   * read, so a job only advances while something polls getDraftLabelJob; the
+   * list's own getTestSets poll does not harvest.
    */
   React.useEffect(() => {
     const running = testSets.filter((ts) => ts.labelJobStatus === 'RUNNING' && ts.labelJobId);
@@ -254,8 +240,8 @@ const TestSets = (): React.JSX.Element => {
     }, 5000);
 
     return () => clearInterval(interval);
-    // Keyed on the running set ids, so this re-arms when a job starts or ends
-    // rather than on every list refresh.
+    // Keyed on the running set ids so this re-arms when a job starts or ends,
+    // not on every list refresh.
   }, [
     testSets
       .filter((ts) => ts.labelJobStatus === 'RUNNING')
@@ -419,9 +405,6 @@ const TestSets = (): React.JSX.Element => {
     return desc.length <= 500;
   };
 
-  // handleAddTestSet / handleAddUploadTestSet moved into CreateTestSetWizard,
-  // which owns creation end-to-end (source choice, validation, submit).
-
   const handleRefresh = async () => {
     setRefreshing(true);
     setError('');
@@ -531,7 +514,6 @@ const TestSets = (): React.JSX.Element => {
       const published = result.data.publishTestSetVersion;
       setSuccessMessage(`Published ${target.name} version ${published?.version ?? ''} as the active reference`);
       setError('');
-      // Refresh so the new version + active reference are reflected in the table
       loadTestSets();
     } catch (err) {
       console.error('Error publishing test set version:', err);
@@ -736,7 +718,7 @@ const TestSets = (): React.JSX.Element => {
       id: 'labelState',
       header: 'Labels',
       cell: (item: TestSetItem) => {
-        // A running labeling job outranks the stored state — it's the live one.
+        // A running job outranks the stored labelState: it is the live one.
         if (item.labelJobStatus === 'RUNNING') {
           return <StatusIndicator type="in-progress">Labeling</StatusIndicator>;
         }
@@ -748,8 +730,8 @@ const TestSets = (): React.JSX.Element => {
           draft: <Badge color="blue">Draft (machine)</Badge>,
           labeled: <Badge color="green">Labeled</Badge>,
         };
-        // Pre-existing sets carry no labelState; they were created with ground
-        // truth, so don't imply they need labeling.
+        // Sets predating labelState were created with ground truth, so a missing
+        // value must not imply they need labeling.
         return item.labelState ? badges[item.labelState] || item.labelState : '-';
       },
       sortingField: 'labelState',
@@ -770,8 +752,8 @@ const TestSets = (): React.JSX.Element => {
         if (!item.latestVersion) {
           return <span style={{ color: '#5f6b7a' }}>draft</span>;
         }
-        // Show the active reference (what runs score against); note if the
-        // latest published version is ahead of it.
+        // Shows the active reference, which is what runs score against, and notes
+        // when the latest published version is ahead of it.
         const active = item.activeReference;
         const label = active ? `v${active}` : `v${item.latestVersion} (no ref)`;
         const behind = active && item.latestVersion > active ? ` · latest v${item.latestVersion}` : '';
@@ -857,11 +839,8 @@ const TestSets = (): React.JSX.Element => {
           description="Manage test sets for document processing"
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              {/* Everything that acts on the selected set lives in one Actions
-                  menu. The header previously carried seven competing controls,
-                  including two dropdowns whose options ("Existing Files" / "New
-                  Upload" vs "From Existing Files" / "From Upload") read almost
-                  identically while doing different things. */}
+              {/* Everything that acts on the selected set belongs in the single
+                  Actions menu, not as another header button. */}
               <Button iconName="refresh" loading={refreshing} onClick={handleRefresh} ariaLabel="Refresh test set list" />
               <ButtonDropdown
                 disabled={selectedItems.length === 0 || loading}
@@ -977,10 +956,8 @@ const TestSets = (): React.JSX.Element => {
         }
       />
 
-      {/* Create is a wizard; the two former "Add Test Set" modals are gone.
-            "Add documents" keeps its own modals — adding to an existing set is a
-            different operation from creating one, which is exactly the
-            distinction the old naming obscured. */}
+      {/* Creating a set goes through the wizard; adding documents to an existing
+            set is a separate operation and keeps its own modals. */}
       <CreateTestSetWizard
         visible={showCreateWizard}
         onDismiss={() => setShowCreateWizard(false)}

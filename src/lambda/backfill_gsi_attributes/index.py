@@ -189,12 +189,9 @@ _TEST_RUN_KEY_RE = re.compile(r"^doc#[^/]+-\d{8}-\d{6}/")
 def _looks_like_test_run_document(pk, item):
     """True when this document item was submitted by a test run.
 
-    Two signals, in order of reliability:
-      - TestSetId / SubmissionSource present: written by the copier once
-        provenance tagging shipped, so this is definitive.
-      - Key shape: the copier writes into "<testSetId>-<YYYYMMDD>-<HHMMSS>/",
-        which a user upload would have to be contrived to imitate. This is the
-        only signal available for documents that predate tagging.
+    SubmissionSource/TestSetId are definitive when present. Key shape
+    ("<testSetId>-<YYYYMMDD>-<HHMMSS>/", written by the test file copier) is the
+    only signal available for documents stored before those were recorded.
     """
     if item.get("SubmissionSource") or item.get("TestSetId"):
         return True
@@ -216,11 +213,8 @@ def _determine_updates(item, pk):
                 break
         # If PK doesn't match any known prefix (e.g., list#, agent#), skip ItemType
 
-    # 1b. Retype documents that a test run submitted. These predate provenance
-    # tagging, so they carry ItemType="document" and appear in the production
-    # Document List alongside real customer uploads. They are identified by their
-    # key shape — the copier writes them under "<testSetId>-<YYYYMMDD>-<HHMMSS>/"
-    # — because the metadata that would say so was never recorded for them.
+    # 1b. Retype test-run submissions: without this they carry ItemType="document"
+    # and show up in the Document List alongside real uploads.
     if item.get("ItemType") == "document" or updates.get("ItemType") == "document":
         if _looks_like_test_run_document(pk, item):
             updates["ItemType"] = "test-document"
@@ -315,10 +309,9 @@ def _apply_update(table, pk, sk, updates):
             )
             expr_values[":zero"] = 0
         elif attr_name == "ItemType" and attr_value == "test-document":
-            # Retyping a test-run document is a deliberate overwrite of an
-            # existing "document" value, so attribute_not_exists alone would
-            # reject it. Still idempotent: the condition fails once the value is
-            # already "test-document".
+            # Retyping deliberately overwrites an existing "document" value, so
+            # attribute_not_exists alone would reject it. Still idempotent: the
+            # condition fails once the value is already "test-document".
             condition_parts.append(
                 f"(attribute_not_exists(#attr{i}) OR #attr{i} = :legacy_doc_type)"
             )

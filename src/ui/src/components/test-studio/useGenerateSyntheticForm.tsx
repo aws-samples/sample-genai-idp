@@ -2,18 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared state + fields for synthetic test-set generation.
+ * Shared state + fields for synthetic test-set generation, rendered identically by
+ * the create-test-set wizard and by the standalone modal that serves the Schema
+ * Builder deep-link (`?generate=1&version=…&className=…`).
  *
- * Extracted from GenerateSyntheticDataModal so the create-test-set wizard and the
- * standalone modal render the *same* form rather than two drifting copies. The
- * wizard is the primary path (generation is one of four sources); the modal
- * survives for the Schema Builder deep-link
- * (`?generate=1&version=…&className=…`), which opens straight into this form with
- * a preselected config version and class.
- *
- * Returns the rendered fields plus everything a container needs to drive them:
- * validity, the live cost estimate, and a submit function. Keeping submit here
- * (rather than in each container) means the two paths cannot diverge on what they
+ * Returns the fields plus validity, the live cost estimate and submit. Submit
+ * lives here, not in the containers, so the two paths cannot diverge on what they
  * send to the generator.
  */
 
@@ -50,13 +44,11 @@ export const MAX_COUNT = 50;
 export const FAST_THRESHOLD = 7;
 export const QUALITY_THRESHOLD = 9;
 
-// Extract the document-class names from a fetched config version. The config
-// dicts arrive as AWSJSON strings; classes live under `.classes[]`, keyed by
-// `$id` / `x-aws-idp-document-type` (same identity the backend uses). The
-// version's own (custom) classes are authoritative; the default config is only
-// used when the version defines no classes of its own (inherits the default
-// wholesale) — otherwise the default's classes would leak into a version that
-// scopes down to a subset (e.g. a W2-only version showing Bank-Statement).
+// Document-class names from a fetched config version. Configs arrive as AWSJSON
+// strings; classes live under `.classes[]`, identified by `$id` /
+// `x-aws-idp-document-type` as on the backend. A version's own classes win, and
+// the default config is consulted only when the version defines none: otherwise
+// default classes leak into a version that deliberately scopes down to a subset.
 const _parse = (v: unknown): Record<string, unknown> => {
   if (typeof v === 'string' && v) {
     try {
@@ -110,8 +102,8 @@ export interface GenerateFormApi {
   error: string;
   /**
    * Start the job. Resolves with the job id, a display label and the resolved
-   * destination test-set id, or null when the request failed (the error is
-   * surfaced through `error`).
+   * destination test-set id, or null when the request failed — in which case the
+   * reason is on `error`.
    */
   submit: () => Promise<{ jobId: string; label: string; testSetId: string } | null>;
   reset: () => void;
@@ -128,8 +120,8 @@ export const useGenerateSyntheticForm = ({
 
   const [mode, setMode] = useState<'prompt' | 'config'>('prompt');
   const [prompt, setPrompt] = useState('');
-  // Prompt-mode class is free text (no version to derive from). Config-mode
-  // class is chosen from the selected version's classes (a Select).
+  // Prompt mode has no version to derive classes from, so its class is free text;
+  // config mode selects from the chosen version's classes.
   const [promptClassName, setPromptClassName] = useState('');
   const [count, setCount] = useState('5');
   const [augment, setAugment] = useState(false);
@@ -194,11 +186,9 @@ export const useGenerateSyntheticForm = ({
     };
   }, [active]);
 
-  // Load the selected version's document classes to populate the class Select,
-  // so a user picks a valid class rather than typing (and mistyping) one.
-  // Depend ONLY on the version name string: fetchVersion from the hook is not
-  // memoized (a fresh reference each render), so including it in the deps would
-  // re-fire this effect on every render — an infinite getConfigVersion loop.
+  // Depends on the version name string only: fetchVersion is not memoized, so
+  // listing it here would re-fire this effect every render (an infinite
+  // getConfigVersion loop).
   const versionName = selectedVersion?.value;
   useEffect(() => {
     if (!versionName) {
@@ -250,8 +240,8 @@ export const useGenerateSyntheticForm = ({
 
   const trimmedNewName = newTestSetName.trim();
   const nameFormatValid = trimmedNewName.length > 0 && trimmedNewName.length <= 50 && NAME_RE.test(trimmedNewName);
-  // A new name whose derived id matches an existing test set would silently
-  // append to it — block it and steer the user to "Add to existing".
+  // A new name whose derived id matches an existing set would silently append to
+  // that set, so it is rejected instead.
   const newNameCollides = nameFormatValid && allTestSetIds.has(toTestSetId(trimmedNewName));
   const newNameValid = nameFormatValid && !newNameCollides;
   const destValid = destMode === 'new' ? newNameValid : Boolean(existingTestSet);
@@ -353,9 +343,8 @@ export const useGenerateSyntheticForm = ({
 
   const fields = (
     <SpaceBetween size="m">
-      {/* Tiles rather than Tabs: this is a choice between two ways of describing
-          what to generate, which reads as a decision (and matches the wizard's
-          source step) rather than as two places to look. */}
+      {/* Tiles, not Tabs: mutually exclusive modes read as a decision, and this
+          matches the wizard's source step. */}
       <FormField label="What should the generator base documents on?" stretch>
         <Tiles
           value={mode}

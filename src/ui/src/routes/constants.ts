@@ -36,9 +36,9 @@ export const testSetDocumentHref = (testSetId: string, objectKey: string, view?:
     .join('/')}${view ? `?view=${view}` : ''}`;
 /**
  * Hash-link helper: href for a test set's annotation queue
- * (/test-studio/sets/:testSetId/annotate). This is the link shared with a scoped
- * annotator — it only navigates; access is enforced server-side against the
- * user's allowedTestSets, so a leaked link grants nothing on its own.
+ * (/test-studio/sets/:testSetId/annotate). This link only navigates; access is
+ * enforced server-side against the user's allowedTestSets, so it grants nothing on
+ * its own and is safe to share with a scoped annotator.
  */
 export const testSetAnnotateHref = (testSetId: string, objectKey?: string): string =>
   `#${TEST_SET_DETAIL_PATH}/${encodeURIComponent(testSetId)}/annotate${objectKey ? `?doc=${encodeURIComponent(objectKey)}` : ''}`;

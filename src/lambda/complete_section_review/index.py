@@ -50,11 +50,8 @@ def handler(event, context):
     # directive is missing or misconfigured (e.g. the prior @aws_auth directive,
     # which AppSync silently ignores on a multi-auth API).
     #
-    # An Annotator's reach is narrower than a Reviewer's: group membership only
-    # gets them to the operation, and _assert_annotator_scope below then requires
-    # the document to belong to a test set in their allowedTestSets. So an
-    # annotator onboarded for one labeling effort cannot review production
-    # documents or another effort's set.
+    # Annotator group membership only reaches the operation; _assert_annotator_scope
+    # then narrows it to documents in the caller's allowedTestSets.
     if not ({"Admin", "Reviewer", "Annotator"}.intersection(user_groups)):
         logger.warning(
             f"Forbidden: caller {user_email} (groups={user_groups}) "
@@ -77,9 +74,8 @@ def handler(event, context):
         return release_review(object_key, username, user_email, is_admin)
 
     if field_name == "skipAllSectionsReview":
-        # Deliberately not extended to Annotator: skipping marks a document
-        # reviewed without looking at it, which is a set-owner decision about
-        # how much ground truth to accept, not an annotator's.
+        # Not available to Annotator: skipping marks a document reviewed without
+        # looking at it, which is the set owner's decision.
         is_reviewer = "Reviewer" in user_groups
         if not is_admin and not is_reviewer:
             raise ValueError(
@@ -101,10 +97,9 @@ def handler(event, context):
 def _assert_annotator_scope(event, object_key):
     """Verify a scoped Annotator may touch this document's test set.
 
-    A review document carries the test set it came from (``TestSetId``, written
-    when the run was sent to review). Annotators are checked against that;
-    Admin/Reviewer are unaffected, and a document with no test set is production
-    HITL work that an Annotator has no business in.
+    A review document carries its originating ``TestSetId``, which is checked
+    against the caller's allowedTestSets. Admin/Reviewer are unaffected; a
+    document with no test set is production HITL work and is refused.
     """
     groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
     if isinstance(groups, str):
@@ -131,8 +126,7 @@ def _assert_annotator_scope(event, object_key):
     try:
         assert_can_access_test_set(event, test_set_id)
     except TestSetAccessDenied as e:
-        # Surface as ValueError so the dispatcher maps it the same way as the
-        # other authorization failures in this handler.
+        # ValueError is what the dispatcher maps to an authorization failure.
         raise ValueError(str(e)) from e
 
 
@@ -175,9 +169,6 @@ def complete_section_review(
                 f"'{object_key}' has no output URI to write to"
             )
         save_edited_data_to_s3(section_output_uri, edited_data)
-        # Test-set HITL: if this doc belongs to a test set, also write the
-        # corrected labels back to the test set's baseline so a later
-        # publishTestSetVersion captures the human annotation as ground truth.
         write_correction_to_test_set_baseline(
             object_key, section_id, edited_data, username, user_email
         )
@@ -306,11 +297,11 @@ def write_correction_to_test_set_baseline(
     """Persist a HITL correction to the owning test set's baseline (ground truth).
 
     A test-set review document is keyed ``{test_run_id}/{filename}`` and carries
-    ``TestSetId`` (written when it was sent to review). The test-set baseline
-    layout is ``{test_set_id}/baseline/{filename}/sections/{section_id}/result.json``.
-    Writing here (not just the doc's own output) is what turns HITL review into
-    reusable, versionable golden-dataset annotation. Best-effort: never fail the
-    review if the doc isn't part of a test set or the write hiccups.
+    ``TestSetId``; the baseline it maps to is
+    ``{test_set_id}/baseline/{filename}/sections/{section_id}/result.json``. Writing
+    there, and not only to the document's own output, is what makes a review
+    reusable as versionable ground truth. Best-effort: a document outside a test
+    set, or a failed write, must not fail the review.
     """
     if not TEST_SET_BUCKET:
         return
@@ -330,18 +321,15 @@ def write_correction_to_test_set_baseline(
         )
         data = json.loads(edited_data) if isinstance(edited_data, str) else edited_data
 
-        # Read the label being replaced *before* overwriting it: comparing it to
-        # what the reviewer saved is what tells the confidence curve whether the
-        # model was right, and after the write that evidence is gone.
+        # Read the label being replaced before overwriting it: the diff against
+        # what the reviewer saved is the only evidence of whether the model was
+        # right, and the write destroys it.
         previous = _read_json(TEST_SET_BUCKET, baseline_key)
 
-        # Mark the label as human-reviewed so draft labeling never overwrites it
-        # (the harvester only replaces labels tagged draft-machine).
+        # Marks the label human-reviewed so draft labeling leaves it alone; the
+        # harvester only replaces labels tagged draft-machine.
         if isinstance(data, dict):
             data["labelSource"] = "reviewed-human"
-            # Carry the provenance the ground-truth viewer reads. Without this the
-            # only record of the review lives in DynamoDB, where the viewer cannot
-            # reach it.
             append_edit_history(previous, data, username, user_email)
 
         s3_client.put_object(
@@ -362,25 +350,17 @@ def write_correction_to_test_set_baseline(
         )
 
 
-# A label reviewed many times must not grow without bound; the most recent
-# entries are the ones anyone reads.
+# Caps the trail on a repeatedly reviewed label; the newest entries are kept.
 MAX_EDIT_HISTORY_ENTRIES = 50
 
 
 def append_edit_history(previous, saved, username, user_email):
     """Record who changed what, in the label itself.
 
-    The reviewer's identity was already captured — in DynamoDB, as
-    HITLReviewHistory — but the ground-truth viewer reads provenance from
-    ``_editHistory`` inside the JSON, which only the direct-to-S3 editor path
-    wrote. So an annotation saved through this Lambda left no visible trail at
-    all: the audit data existed where nothing could show it.
-
-    The field-level diff is computed against the label being replaced, which is
-    already in hand for the curve observation, so this costs no extra read. Bob
-    asked for the trail; Spencer's use for it is spotting a field the whole team
-    keeps correcting, which is evidence of a configuration gap rather than of bad
-    annotators — that only works if the diffs are here.
+    The ground-truth viewer reads provenance from ``_editHistory`` inside the
+    label JSON, so a review recorded only in DynamoDB (HITLReviewHistory) is
+    invisible to it. The field-level diff is taken against the label being
+    replaced, which is already in hand for the curve observation.
     """
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -396,11 +376,9 @@ def append_edit_history(previous, saved, username, user_email):
             "diffs": diffs,
         }
 
-    # Seeded from the label being replaced, not from the incoming edit. The
-    # client sends the section body it wants stored, and a client that does not
-    # round-trip _editHistory would silently erase every prior reviewer's entry —
-    # the trail belongs to the server. Prefer whichever copy is longer so a client
-    # that DOES send it back cannot truncate the record either.
+    # The trail is server-owned: seed it from the stored label, since a client that
+    # does not round-trip _editHistory would otherwise erase every prior entry.
+    # Taking the longer of the two also stops a client from truncating it.
     stored = (previous or {}).get("_editHistory")
     incoming = saved.get("_editHistory")
     history = stored if isinstance(stored, list) else []
@@ -412,7 +390,7 @@ def append_edit_history(previous, saved, username, user_email):
 def _field_diffs(previous, saved):
     """Field path → {originalValue, newValue} for every value the review changed.
 
-    Shares the flattening the curve uses, so "changed" means the same thing to
+    Uses the same flattening as the curve, so "changed" means the same thing to
     the audit trail and to the calibration signal.
     """
     if not previous:
@@ -445,19 +423,15 @@ def _read_json(bucket, key):
 
 
 def record_curve_observations(test_set_id, previous, saved):
-    """Teach the confidence→accuracy curve from what this reviewer just did.
+    """Record confidence→accuracy observations from this review.
 
-    A field the reviewer left alone was predicted correctly; a field they changed
-    was not. Paired with the confidence the model had claimed, that is exactly
-    the ``(confidence, correct)`` observation the review-effort estimator's curve
-    is built from — and because review is worst-first, these observations land in
-    the low-confidence bins where the estimate is most sensitive.
-
-    Best-effort by design: the curve is an optimization, and failing to record an
-    observation must never fail a reviewer's save.
+    A field the reviewer left alone was predicted correctly; a changed one was not.
+    Paired with the model's claimed confidence, that is the ``(confidence, correct)``
+    observation the review-effort estimator's curve is built from. Best-effort: the
+    curve is an optimization and must never fail a reviewer's save.
     """
     if not previous:
-        return  # Nothing was predicted, so there is no verdict to record.
+        return  # No prior prediction, so there is no verdict to record.
     try:
         from idp_common.evaluation.curve_store import (
             CurveStore,
@@ -469,9 +443,9 @@ def record_curve_observations(test_set_id, previous, saved):
             return
 
         table = dynamodb.Table(TRACKING_TABLE_NAME)
-        # Key the curve by the config that produced these labels, so a later
-        # config change doesn't inherit a curve measured under different
-        # confidence semantics.
+        # Key the curve by the config that produced these labels; a later config
+        # change must not inherit a curve measured under different confidence
+        # semantics.
         config_version = (previous.get("metadata") or {}).get("config_version")
         accepted = CurveStore(table).add_observations(
             test_set_id,

@@ -164,8 +164,7 @@ def _parse_and_validate_uri(event):
     return bucket, key, version_id
 
 
-# Content types browsers render natively. Anything else is served as an
-# attachment so it downloads rather than rendering as gibberish in a frame.
+# Content types a browser renders natively; anything else is left to download.
 _INLINE_RENDERABLE_TYPES = ("application/pdf",)
 _INLINE_RENDERABLE_PREFIXES = ("image/", "text/")
 
@@ -206,20 +205,11 @@ def _handle_presigned_url(event):
     if version_id:
         presign_params["VersionId"] = version_id
 
-    # Override the response headers S3 will send, rather than relying on the
-    # stored metadata. Uploaders that don't set ContentType leave objects as
-    # binary/octet-stream, and a browser handed that downloads the file instead of
-    # rendering it — a PDF opened in the viewer's iframe would silently become a
-    # download. The synthetic generator uploads this way, so every generated test
-    # set was affected while a zip-uploaded one worked, which made it look like a
-    # viewer bug rather than a metadata one.
-    #
-    # Correcting it here also repairs objects already stored with the wrong type,
-    # which fixing the uploader alone would not.
+    # Override the response headers instead of trusting stored metadata: objects
+    # uploaded without a ContentType are binary/octet-stream, which a browser
+    # downloads rather than renders. Overriding here also repairs objects already
+    # stored with the wrong type.
     presign_params["ResponseContentType"] = content_type
-    # inline for types a browser can display; attachment for the rest, so
-    # spreadsheets and Word documents still download rather than rendering as
-    # gibberish in a frame.
     if _is_inline_renderable(content_type):
         presign_params["ResponseContentDisposition"] = "inline"
 

@@ -3,23 +3,19 @@
 
 """Server-side enforcement of per-user test-set scope (``allowedTestSets``).
 
-The annotation queue onboards people — often external contractors — to label a
-*single* test set. The rule is "one link, one queue, do nothing else", and this
-module is what makes that a security boundary rather than a UI convention: an
-``Annotator`` may read and annotate only the test sets named in their
+An ``Annotator`` may read and annotate only the test sets named in their
 ``allowedTestSets``, enforced in every resolver that touches test-set documents.
+This is a security boundary, not a UI convention: annotators are often external
+contractors onboarded to label a single test set.
 
-**The deep-link is not a credential.** Sharing a queue URL is safe precisely
-because the URL only navigates; access is gated by the scoped Cognito session.
-That property only holds if the server checks scope on every operation, so these
-helpers are deliberately small and total — one lookup, one assertion — and the
-assertion raises rather than returning a falsy value a caller could forget to
-check.
+A queue deep-link is not a credential — the URL only navigates, and access is
+gated by the scoped Cognito session. That holds only if the server checks scope on
+every operation, so the assertion helper raises rather than returning a falsy
+value a caller could forget to check.
 
 Lives in ``idp_common`` because three separate deploy artifacts enforce the same
-rule (the test-set resolver, the HITL review Lambda, and the queue), and a scope
-check that drifts between them is a privilege-escalation bug rather than an
-inconsistency.
+rule (the test-set resolver, the HITL review Lambda, and the queue); a scope check
+that drifts between them is a privilege-escalation bug.
 """
 
 from __future__ import annotations
@@ -38,17 +34,14 @@ UNSCOPED_GROUPS = ("Admin", "Author")
 # The role this scope exists for.
 ANNOTATOR_GROUP = "Annotator"
 
-# Scope lookups happen on every queue read and every review operation, so they
-# are cached briefly per Lambda container. The TTL bounds how long a *revoked*
-# annotator keeps access — the reason this is 5 minutes and not an hour.
+# Scope lookups happen on every queue read and every review operation, so they are
+# cached briefly per Lambda container. The TTL bounds how long a *revoked*
+# annotator keeps access, hence minutes rather than hours.
 _SCOPE_CACHE_TTL_SECONDS = 300
 
-# An *empty* scope is cached far more briefly. The two directions are not
-# symmetric: being slow to revoke is a deliberate trade for read cost, but being
-# slow to GRANT is just a defect. Caching a denial for the full TTL meant an
-# annotator who tried before being assigned kept getting "not assigned to this
-# test set" for five minutes after access was granted — with the error telling
-# them to ask for the assignment they already had.
+# An *empty* scope is cached far more briefly, because the two directions are not
+# symmetric: being slow to revoke trades safely against read cost, but being slow
+# to grant leaves a newly-assigned annotator denied for the full TTL.
 _EMPTY_SCOPE_CACHE_TTL_SECONDS = 10
 _scope_cache: Dict[str, Dict[str, Any]] = {}
 
@@ -60,8 +53,8 @@ class TestSetAccessDenied(Exception):
     scope failure is never confused with a missing-record error.
     """
 
-    # Stops pytest trying to collect this as a test class on the strength of its
-    # "Test" prefix (it would warn on every run).
+    # Stops pytest collecting this as a test class on the strength of its "Test"
+    # prefix.
     __test__ = False
 
 
@@ -89,9 +82,8 @@ def caller_email(event: Optional[Dict[str, Any]]) -> str:
 def is_direct_invoke(event: Optional[Dict[str, Any]]) -> bool:
     """True for a trusted service-to-service invoke (no Cognito identity).
 
-    Matches the convention already used across these resolvers: a direct Lambda
-    invoke carries no ``identity`` and is gated by IAM on the function ARN
-    instead of by Cognito groups.
+    A direct Lambda invoke carries no ``identity`` and is gated by IAM on the
+    function ARN instead of by Cognito groups.
     """
     return (event or {}).get("identity") is None
 
@@ -142,8 +134,7 @@ def get_allowed_test_sets(email: str, users_table: Any = None) -> Optional[List[
                 if stored:
                     scope = [str(s) for s in stored]
         except Exception as e:  # noqa: BLE001
-            # Fail closed for the caller that matters: log and return None, but
-            # note that Annotators are denied when scope is None, so a lookup
+            # Fails closed: Annotators are denied when scope is None, so a lookup
             # failure removes access rather than granting it.
             logger.warning("Could not look up test-set scope for %s: %s", email, e)
 
@@ -168,8 +159,7 @@ def assert_can_access_test_set(
     1. A direct (IAM-gated) invoke is trusted — no Cognito identity to scope.
     2. Admin and Author are unscoped: they own test sets.
     3. An Annotator must have ``test_set_id`` in their ``allowedTestSets``. An
-       Annotator with *no* scope is denied rather than unrestricted — the safe
-       direction for a role designed to see exactly one set, and it means a
+       Annotator with *no* scope is denied rather than unrestricted, so a
        misconfigured or half-created annotator fails closed.
     4. Any other role (e.g. Reviewer, Viewer) is refused test-set annotation
        access; production HITL review is a different axis and grants nothing here.
@@ -221,8 +211,8 @@ def visible_test_sets(
 ) -> List[str]:
     """Filter a list of test-set ids down to those the caller may see.
 
-    Used by list operations, where denying the whole request would be wrong —
-    an annotator listing test sets should see their own, not an error.
+    Used by list operations, where denying the whole request would be wrong: an
+    annotator listing test sets should see their own, not an error.
     """
     if is_direct_invoke(event):
         return list(candidates)

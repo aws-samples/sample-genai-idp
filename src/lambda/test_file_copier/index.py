@@ -40,7 +40,6 @@ def handler(event, context):
             if files_to_process is None:
                 files_to_process = number_of_files
             config_version = message.get("configVersion")  # Optional parameter
-            # Optional explicit document list (draft labeling a subset)
             object_keys = message.get("objectKeys") or []
             # "draft-labeling" runs create ground truth; anything else is scored
             # against it. Absent on messages enqueued before this field existed.
@@ -63,10 +62,8 @@ def handler(event, context):
             if not input_files:
                 raise ValueError(f"No input files found for test set: {test_set_id}")
 
-            # Restrict to an explicit set of documents, if one was requested.
-            # Distinct from numberOfFiles, which takes the *first* N files of the
-            # set — that can't express "these specific documents", which is what
-            # labeling or re-labeling a subset needs.
+            # objectKeys names exact documents, where numberOfFiles takes the first
+            # N of the set.
             if object_keys:
                 requested = set(object_keys)
                 missing = requested - set(input_files)
@@ -113,8 +110,7 @@ def handler(event, context):
                 input_files = input_files[:files_to_process]
                 capped = True
 
-            # Keep baselines aligned with whatever input selection survived above
-            # (explicit objectKeys, the fileCount cap, or both).
+            # Keep baselines aligned with the surviving input selection.
             if object_keys or capped:
                 input_file_set = set(input_file + "/" for input_file in input_files)
                 baseline_files = [
@@ -147,17 +143,11 @@ def handler(event, context):
             )
 
             # Copy baseline files from test set bucket to baseline bucket with
-            # test_run_id prefix.
-            #
-            # Skipped entirely for a draft-labeling run. That run's whole purpose is
-            # to PRODUCE the baseline, so staging the current one makes the
-            # evaluation step score the new extraction against a stale copy of
-            # itself. Observed live: a re-run with corrected settings reported
-            # accuracy 0.47 by comparing its single merged section against one
-            # section of the previous run's output — and because the aggregation
-            # records confidence-curve observations for any run carrying a
-            # TestSetId, that meaningless verdict fed the calibration curve the
-            # review estimator depends on.
+            # test_run_id prefix. Skipped for a draft-labeling run: that run
+            # produces the baseline, so staging the existing one makes evaluation
+            # score the new extraction against a stale copy of itself, and the
+            # resulting accuracy would also feed the confidence-calibration curve
+            # recorded for every run carrying a TestSetId.
             if purpose == "draft-labeling":
                 logger.info(
                     f"Draft-labeling run {test_run_id}: not staging baselines "
@@ -179,9 +169,8 @@ def handler(event, context):
             if len(successful_input_files) == 0:
                 raise ValueError("All input files failed to copy")
 
-            # A set with no baseline at all is an unlabeled set being run to
-            # produce draft labels — nothing to copy, so this is not a failure.
-            # Only treat it as one when baselines existed but every copy failed.
+            # A set with no baselines is unlabeled, not broken; only a set whose
+            # baselines all failed to copy is a failure.
             if baseline_files and len(successful_baseline_files) == 0:
                 raise ValueError("All baseline files failed to copy")
 
@@ -246,10 +235,8 @@ def _copy_files_to_bucket(
     """Copy files from source bucket to destination bucket - track failures"""
     successful_files = []
 
-    # Nothing to copy: an unlabeled test set (being draft-labeled) has no
-    # baseline files. Returning early matters because ThreadPoolExecutor raises
-    # "max_workers must be greater than 0" on an empty list, which would fail the
-    # whole run.
+    # An unlabeled test set has no baseline files, and ThreadPoolExecutor rejects
+    # max_workers=0, so an empty list must short-circuit.
     if not files:
         return successful_files
 
@@ -266,10 +253,9 @@ def _copy_files_to_bucket(
                 "Key": dest_key,
             }
 
-            # Object metadata is how provenance reaches the pipeline: the document
+            # Object metadata carries provenance into the pipeline: the document
             # enters via the ordinary S3 -> EventBridge -> queue-sender path, and
-            # Document.from_s3_event already HEADs the object, so this costs no
-            # extra call.
+            # Document.from_s3_event already HEADs the object.
             metadata = {}
             if config_version:
                 metadata["config-version"] = config_version

@@ -183,12 +183,10 @@ class DocumentDynamoDBService:
             "ObjectStatus": document.status.value,
             "InitialEventTime": document.initial_event_time,
             "QueuedTime": document.queued_time,
-            # ItemType is the TypeDateIndex hash key, so it is what partitions the
-            # production Document List from non-production submissions (Test
-            # Studio, Auto Optimizer). Filtering on a projected attribute instead
-            # would not work: DynamoDB applies FilterExpression *after* Limit, so
-            # on a stack where most documents are test artifacts a page of 50 can
-            # return 1 with no indication the rest were dropped.
+            # Partitioning on the index hash key, not a FilterExpression over a
+            # projected attribute: DynamoDB applies FilterExpression *after* Limit,
+            # so where most documents are test artifacts a page of 50 can return 1
+            # with no indication the rest were dropped.
             "ItemType": ITEM_TYPE_TEST_DOCUMENT
             if document.submission_source
             else ITEM_TYPE_DOCUMENT,

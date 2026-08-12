@@ -95,15 +95,13 @@ def handler(event, context):
             raise Exception("Context cannot exceed 500 characters")
 
         number_of_files = input_data.get("numberOfFiles")
-        # Optional explicit document list. Unlike numberOfFiles (first N files of
-        # the set), this names exactly which documents to process — what draft
-        # labeling a subset requires.
+        # Names exactly which documents to process, where numberOfFiles takes the
+        # first N of the set.
         object_keys = input_data.get("objectKeys") or []
         config_version = input_data.get("configVersion")
-        # A draft-labeling run PRODUCES ground truth rather than being scored
-        # against it, so evaluation is meaningless for it. Carried explicitly
-        # rather than inferred from the free-text `context`, which is a user-facing
-        # label that must not be load-bearing.
+        # A draft-labeling run produces ground truth rather than being scored
+        # against it, so it is never evaluated. Carried as its own flag; the
+        # free-text `context` is a user-facing label and must not be load-bearing.
         purpose = "draft-labeling" if input_data.get("draftLabeling") else "scoring"
         tracking_table = os.environ["TRACKING_TABLE"]
         config_table = os.environ["CONFIG_TABLE"]
@@ -141,9 +139,9 @@ def handler(event, context):
         # Capture config for the specified version or current active config
         config = _capture_config(config_table, config_version)
 
-        # Pin the test set's active reference version this run scored against
-        # (symmetric to ConfigVersion). None for sets that were never published,
-        # so comparisons can distinguish config drift from ground-truth drift.
+        # Pin the ground-truth version scored against (symmetric to ConfigVersion),
+        # so comparisons can separate config drift from ground-truth drift. None for
+        # test sets that were never published.
         test_set_version = test_set.get("activeReference")
 
         # Store initial test run metadata
@@ -190,7 +188,6 @@ def handler(event, context):
         if number_of_files is not None:
             message_body["numberOfFiles"] = number_of_files
 
-        # Explicit document list, when the caller named specific documents
         if object_keys:
             message_body["objectKeys"] = object_keys
 
@@ -198,8 +195,8 @@ def handler(event, context):
         if config_version is not None:
             message_body["configVersion"] = config_version
 
-        # Tell the copier not to stage baselines for a draft-labeling run: the
-        # baseline is what the run is creating, so scoring against it compares the
+        # The copier must not stage baselines for a draft-labeling run: the baseline
+        # is what the run is creating, so scoring against it would compare the
         # extraction to a stale copy of itself.
         if purpose == "draft-labeling":
             message_body["purpose"] = purpose
@@ -228,12 +225,11 @@ def handler(event, context):
 def send_test_run_to_review(args):
     """Mark a completed test run's documents for HITL review, on demand.
 
-    Running a test set copies its inputs into the pipeline under a
-    ``{test_run_id}/`` prefix, so each doc becomes a first-class ``doc#`` item
-    with confidence-threshold alerts. This flips those docs into the review
-    hopper (HITLTriggered / HITLStatus=PendingReview) without waiting for the
-    confidence-only auto-trigger — the entry point for annotating a test set's
-    ground truth. Only docs that actually have confidence alerts are queued.
+    A test run's inputs are copied into the pipeline under a ``{test_run_id}/``
+    prefix, so each becomes a first-class ``doc#`` item with confidence alerts.
+    This flips those docs into the review hopper (HITLTriggered /
+    HITLStatus=PendingReview) without waiting for the confidence-only
+    auto-trigger. Only docs that have confidence alerts are queued.
     """
     test_run_id = args["testRunId"]
     tracking_table = os.environ["TRACKING_TABLE"]
@@ -255,8 +251,7 @@ def send_test_run_to_review(args):
             skipped += 1
             continue
 
-        # Only queue docs with confidence alerts, and never clobber a review
-        # that's already completed/skipped.
+        # Never reopen a review that is already completed or skipped.
         alert_count = int(doc.get("ConfidenceAlertCount", 0) or 0)
         status = doc.get("HITLStatus", "")
         if alert_count <= 0 or status in (

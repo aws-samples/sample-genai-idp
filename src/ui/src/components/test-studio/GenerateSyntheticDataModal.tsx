@@ -2,13 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Standalone synthetic-generation dialog, kept for the Schema Builder deep-link
- * (`?generate=1&version=…&className=…`), which lands directly on this form with a
- * preselected config version and document class.
- *
- * The normal entry point is the create-test-set wizard, where generation is one of
- * four sources. Both render the SAME fields via useGenerateSyntheticForm, so the
- * two paths cannot drift — this file is now just a Modal shell around it.
+ * Modal shell for synthetic generation, serving the Schema Builder deep-link
+ * (`?generate=1&version=…&className=…`) that lands directly on the form with a
+ * preselected config version and class. The create-test-set wizard is the normal
+ * entry point; both render the same fields via useGenerateSyntheticForm.
  */
 
 import React from 'react';
@@ -18,11 +15,8 @@ import useGenerateSyntheticForm from './useGenerateSyntheticForm';
 interface GenerateSyntheticDataModalProps {
   visible: boolean;
   onDismiss: () => void;
-  // Called after a successful request with the job id, a display label, and the
-  // resolved destination test-set id so the caller can key its optimistic row.
+  /** The testSetId is the resolved destination, for keying an optimistic row. */
   onStarted: (jobId: string, label: string, testSetId: string) => void;
-  // Optional initial values for deep-links (e.g. Schema Builder "generate test
-  // set for this class") — preselects config mode, version, and class.
   initialTab?: 'prompt' | 'config';
   initialVersion?: string;
   initialClassName?: string;

@@ -75,18 +75,13 @@ def _caller_in_groups(event, allowed):
     return bool(set(allowed).intersection(groups))
 
 
-# Operations a scoped Annotator may reach. Everything else in this resolver is
-# test-set *management* (create, publish, delete, run configs) and stays
-# Admin/Author only, so an annotator onboarded for one labeling effort has no
-# route to it. Each of these enforces per-set scope internally via
-# assert_can_access_test_set — reaching the operation is not the same as being
+# Operations a scoped Annotator may reach; every other field here is test-set
+# management and stays Admin/Author. Each of these must also enforce per-set scope
+# via assert_can_access_test_set — reaching the operation is not the same as being
 # allowed to see a given set.
 ANNOTATOR_ALLOWED_FIELDS = (
     "getAnnotationQueue",
     "getTestSetDocuments",
-    # Correcting a misclassified document is annotation work, not test-set
-    # management: it only re-labels one document in a set the annotator is already
-    # assigned to, and the alternative is that a wrong class blocks them entirely.
     "reextractTestSetDocument",
 )
 
@@ -95,8 +90,8 @@ def handler(event, context):
     field_name = event["info"]["fieldName"]
     logger.info(f"Test set resolver invoked with field_name: {field_name}")
 
-    # Defense-in-depth: Test Studio test-set operations are Admin+Author, plus a
-    # narrow allowlist an Annotator may reach for their own queue.
+    # Defense-in-depth: test-set operations are Admin+Author, plus the
+    # ANNOTATOR_ALLOWED_FIELDS allowlist.
     # Allow direct Lambda invocations (no 'identity' field or identity=None) for CI/automation.
     # AppSync invocations always have 'identity' with non-None value, so RBAC is still enforced for UI users.
     # Security: Direct invocation path is gated by IAM (lambda:InvokeFunction permission on this ARN),
@@ -135,9 +130,7 @@ def handler(event, context):
     elif field_name == "getTestSets":
         return get_test_sets()
     elif field_name == "getTestSetDocuments":
-        # Annotators reach this to render their queue's documents, so it must
-        # verify per-set scope — group membership alone would let one annotator
-        # read another effort's documents.
+        # Annotator-reachable: group membership alone would expose other sets.
         assert_can_access_test_set(event, event["arguments"].get("testSetId") or "")
         return get_test_set_documents(event["arguments"])
     elif field_name == "publishTestSetVersion":
@@ -147,9 +140,7 @@ def handler(event, context):
     elif field_name == "generateDraftLabels":
         return generate_draft_labels(event["arguments"], event)
     elif field_name == "reextractTestSetDocument":
-        # Annotators correct classes in their own sets, so scope is enforced per
-        # set here — group membership alone would let one annotator re-run
-        # documents in another effort's set.
+        # Annotator-reachable: group membership alone would expose other sets.
         input_data = event["arguments"].get("input", event["arguments"])
         assert_can_access_test_set(event, input_data.get("testSetId") or "")
         return reextract_test_set_document(event["arguments"], event)
@@ -459,9 +450,8 @@ def add_documents_to_test_set_from_upload(args):
 # freezes the current document + label state into a numbered version and, by
 # default, marks it the "active reference" that scoring runs compare against.
 #
-# The design is additive: existing test sets have no version items and read as
-# latestVersion=0 / activeReference=None, so nothing breaks and no backfill is
-# needed. See docs/proposals/ground-truth-hitl/implementation/.
+# Test sets with no version items read as latestVersion=0 / activeReference=None,
+# so no backfill is required.
 # ---------------------------------------------------------------------------
 
 
@@ -525,14 +515,11 @@ def publish_test_set_version(args, event=None):
     if not meta:
         raise Exception(f"Test set '{test_set_id}' not found")
 
-    # Reserve the version number by atomically incrementing the counter on the
-    # metadata item, and only then write the version item. Computing
-    # latestVersion + 1 from the read above and writing it back would be a
-    # read-modify-write race: two concurrent publishes both read N and both
-    # write version N+1, so the second silently overwrites the first's
-    # "immutable" version. ADD serializes the allocation in DynamoDB, so each
-    # caller gets a distinct number. attribute_exists(PK) keeps update_item
-    # from upserting a metadata row for a set deleted since the read above.
+    # Reserve the version number with an atomic ADD before writing the version
+    # item. Deriving it from the read above would be a read-modify-write race in
+    # which two concurrent publishes both write version N+1, the second
+    # overwriting the first's "immutable" version. attribute_exists(PK) stops
+    # update_item upserting metadata for a set deleted since the read.
     tracking_table = boto3.resource("dynamodb").Table(os.environ["TRACKING_TABLE"])
     try:
         reserve = tracking_table.update_item(
@@ -556,7 +543,6 @@ def publish_test_set_version(args, event=None):
         except Exception:
             created_by = None
 
-    # Immutable version item: snapshot the fields that describe this frozen set.
     version_item = {
         "PK": f"testset#{test_set_id}",
         "SK": _version_sk(next_version),
@@ -571,19 +557,13 @@ def publish_test_set_version(args, event=None):
         "createdAt": now,
         "createdBy": created_by,
     }
-    # Belt-and-braces: never overwrite an existing version item, even if the
-    # counter were ever reset or rewound by hand.
+    # Versions are immutable, even if the counter were rewound by hand.
     db_client.put_item(version_item, condition_expression="attribute_not_exists(SK)")
 
-    # Publish the pointers now that the version item exists. Kept separate from
-    # the reservation so a failed version write leaves a gap in the numbering
-    # rather than a publishedVersion pointing at a version that isn't there.
-    #
-    # Only ever advance the pointers. Concurrent publishes can reach this write
-    # out of order (v2 before v1), and an unconditional SET would leave the
-    # newest version published but the pointers referring to an older one.
-    # A failed condition just means a newer publish already won, so it is not
-    # an error for this caller — its version item is written either way.
+    # Pointers are advanced only after the version item exists, so a failed version
+    # write leaves a numbering gap rather than a pointer to a missing version, and
+    # only ever forwards, since concurrent publishes can arrive out of order. A
+    # failed condition means a newer publish won and is not an error here.
     pointer_expr = "SET publishedVersion = :v"
     pointer_values = {":v": next_version}
     if set_active:
@@ -621,14 +601,10 @@ def publish_test_set_version(args, event=None):
 # machine-generated ground-truth candidates ("draft labels") with per-field
 # confidence, which a human then reviews and confirms.
 #
-# This deliberately reuses the *scoring* pipeline rather than a second
-# extraction path: startTestRun already copies the set's inputs into the
-# pipeline, and the pipeline already emits inference_result plus per-field
-# confidence in explainability_info. Reimplementing OCR/classify/extract/assess
-# here would duplicate that orchestration and let the confidence semantics
-# drift from the ones real scoring runs (and the estimator) rely on. So a
-# labeling job is an ordinary test run whose results are harvested back into the
-# test set's baseline/ prefix as draft labels.
+# A labeling job is an ordinary test run whose results are harvested back into the
+# test set's baseline/ prefix. Reusing the scoring pipeline rather than a second
+# extraction path keeps confidence semantics identical to the ones scoring runs and
+# the estimator rely on.
 #
 # The job item is SK='labeljob#<testRunId>' under the test set's PK, so jobs are
 # listable per set and expire with it.
@@ -636,9 +612,8 @@ def publish_test_set_version(args, event=None):
 
 LABEL_SOURCE_DRAFT = "draft-machine"
 LABEL_SOURCE_HUMAN = "reviewed-human"
-# Ground truth supplied with the test set rather than produced or reviewed here.
-# Authoritative (draft labeling will not overwrite it) but not review *work*, so
-# it must not count toward annotation progress.
+# Ground truth supplied with the test set. Authoritative — draft labeling will not
+# overwrite it — but not review work, so it never counts toward annotation progress.
 LABEL_SOURCE_UPLOADED = "uploaded"
 
 
@@ -659,13 +634,9 @@ def _as_int(value):
 def _harvest_active_label_job(test_set_id, meta):
     """Advance the set's most recent labeling job and return its current state.
 
-    Labels are harvested on read, so whoever is polling has to drive the harvest.
-    Without this an annotator who opens the workspace while labeling is running
-    sees an empty queue that never fills: the job only advanced while someone
-    watched the owner-facing detail page, which an annotator cannot open.
-
-    Best-effort — a harvest failure must not fail the queue, which is still
-    usable for any documents already labeled.
+    Labels are harvested on read, so every caller that displays a job must drive
+    the harvest or the job never progresses. Best-effort: a harvest failure must
+    not fail the queue, which still works for already-labeled documents.
     """
     job_id = meta.get("labelJobId")
     if not job_id:
@@ -687,17 +658,13 @@ def _harvest_active_label_job(test_set_id, meta):
 
 
 def _documents_needing_labels(test_set_id):
-    """Object keys with no ground truth of their own, worst-first order aside.
+    """Object keys with no ground truth of their own.
 
-    A document that already carries ground truth — uploaded, generated, or
-    human-reviewed — has nothing for a labeling run to add: the harvester would
-    process it and then decline to write, because only a prior machine draft is
-    replaceable. On a mixed set (some generated ground truth, some bare
-    documents) labeling everything therefore paid for inference on documents it
-    would discard.
+    A document already carrying ground truth (uploaded, generated or reviewed) is
+    excluded, because the harvester declines to overwrite anything but a machine
+    draft — labeling it would pay for inference that gets discarded.
 
-    Returns ``(needs_labels, already_labeled_count)``. An empty first element
-    means the whole set is already labeled.
+    Returns ``(needs_labels, already_labeled_count)``.
     """
     needs = []
     already = 0
@@ -708,8 +675,7 @@ def _documents_needing_labels(test_set_id):
             {"testSetId": test_set_id, "limit": 200, "nextToken": next_token}
         )
         for doc in page.get("documents") or []:
-            # A draft is replaceable, so a previously drafted document is still a
-            # candidate — re-running to pick up a better config is legitimate.
+            # A draft is replaceable, so a drafted document is still a candidate.
             if doc.get("labelSource") in (None, LABEL_SOURCE_DRAFT):
                 needs.append(doc["objectKey"])
             else:
@@ -729,11 +695,9 @@ def generate_draft_labels(args, event=None):
     labels are only replaced when they are themselves machine drafts, so
     re-running never clobbers reviewed or hand-uploaded ground truth.
 
-    Without an explicit ``objectKeys``, only documents that *need* labels are
-    processed. Labeling a whole mixed set would spend inference on documents
-    whose ground truth the harvester then refuses to overwrite — most visibly on
-    a fully generated set, where every document already has ground truth and the
-    run produced nothing but noise.
+    Without an explicit ``objectKeys``, only documents that need labels are
+    processed; labeling the rest would spend inference on results the harvester
+    then refuses to write.
     """
     input_data = args.get("input", args)
     test_set_id = input_data["testSetId"]
@@ -766,10 +730,8 @@ def generate_draft_labels(args, event=None):
                 f"skipping {already_labeled} that already have ground truth"
             )
 
-    # Delegate the run itself to the test runner (single owner of run creation,
-    # config capture and version pinning) via a direct Lambda invoke. objectKeys
-    # passes through as an explicit document list, so labeling a subset processes
-    # only those documents rather than the whole set.
+    # The test runner is the single owner of run creation, config capture and
+    # version pinning, so the run is delegated to it rather than built here.
     runner_arn = os.environ["TEST_RUNNER_FUNCTION_ARN"]
     run_input = {
         "testSetId": test_set_id,
@@ -786,8 +748,8 @@ def generate_draft_labels(args, event=None):
     response = lambda_client.invoke(
         FunctionName=runner_arn,
         InvocationType="RequestResponse",
-        # No 'identity' key: this is a trusted service-to-service invoke, and the
-        # caller was already authorized for generateDraftLabels above.
+        # No 'identity' key: a trusted service-to-service invoke, already
+        # authorized for generateDraftLabels above.
         Payload=json.dumps(
             {"info": {"fieldName": "startTestRun"}, "arguments": {"input": run_input}}
         ).encode("utf-8"),
@@ -819,8 +781,7 @@ def generate_draft_labels(args, event=None):
     }
     db_client.put_item(job_item)
 
-    # Mark the set as actively being labeled so the UI can show progress even if
-    # the user navigates away and comes back.
+    # Recorded on the set so progress survives the user navigating away.
     db_client.update_item(
         key={"PK": f"testset#{test_set_id}", "SK": "metadata"},
         update_expression="SET labelJobId = :j, labelJobStatus = :s",
@@ -837,22 +798,17 @@ def generate_draft_labels(args, event=None):
 def reextract_test_set_document(args, event=None):
     """Re-run extraction for one document after its class was corrected.
 
-    An annotator who finds a bank check classified as a bank statement can fix the
-    class, but the fields underneath it were extracted against the wrong schema —
-    so the correction is only half the work. This re-runs the document and lets the
-    ordinary harvest replace its draft labels with ones the right schema produced.
+    Correcting the class leaves the fields beneath it extracted against the wrong
+    schema, so the document is re-run and the ordinary harvest replaces its draft
+    labels.
 
-    Implemented as its own labeling job rather than through ``processChanges``
-    because the write-back is what matters here: draft labels are harvested from
-    the job identified by the *set's* ``labelJobId``, so a document reprocessed
-    outside a job of its own would extract correctly and then never reach the
-    baseline. Starting a one-document job keeps the existing harvest path — and
-    its overwrite safety, pruning and curve bookkeeping — exactly as it is.
+    Runs as a one-document labeling job rather than via ``processChanges``: labels
+    are harvested from the job named by the set's ``labelJobId``, so a document
+    reprocessed outside a job would never reach the baseline. Going through a job
+    also keeps the harvest's overwrite safety, pruning and curve bookkeeping.
 
-    The class is pinned by writing it to the baseline first: the copier stamps
-    provenance metadata, and classification is skipped for pages that already
-    carry a class, so the run extracts against the class the annotator chose
-    instead of re-deciding it.
+    The class is pinned by writing it to the baseline first, since classification is
+    skipped for pages that already carry one.
     """
     input_data = args.get("input", args)
     test_set_id = input_data["testSetId"]
@@ -893,27 +849,18 @@ def reextract_test_set_document(args, event=None):
 def _set_baseline_document_class(test_set_bucket, test_set_id, object_key, class_type):
     """Stamp a corrected class onto every section of a document's baseline.
 
-    Written before the run so the extraction uses it, and written even for
-    sections the run will overwrite: if the run fails, the annotator's correction
-    is still recorded rather than silently lost.
+    Written before the run so the extraction uses it, and written even for sections
+    the run will overwrite, so a failed run still records the correction.
 
-    A ``reviewed-human`` section is demoted to ``draft-machine``. This is the one
-    place a reviewed label is downgraded, and it is deliberate: the harvest refuses
-    to overwrite reviewed labels, so without this a re-extract of a document
-    someone had already confirmed would run to completion and write nothing —
-    reporting success while leaving the wrong-class fields in place. Asking to
-    re-extract after correcting the class *is* a statement that the current labels
-    are wrong. The UI says so before calling this.
+    A ``reviewed-human`` section is demoted to ``draft-machine`` — the only place a
+    reviewed label is downgraded. The harvest refuses to overwrite reviewed labels,
+    so otherwise a re-extract would report success and leave the wrong-class fields
+    in place; requesting it after a class correction asserts the labels are wrong.
 
-    **Authored ground truth is never demoted.** A baseline carrying no
-    ``labelSource`` was supplied when the test set was created (zip upload,
-    pattern-based, or synthetic) — nobody predicted it, so there is nothing for a
-    re-extraction to correct, and overwriting it would replace authoritative data
-    with a machine guess. Found live: re-extracting one document of the
-    pre-deployed ``realkie-fcc-verified`` benchmark demoted its verified label,
-    which the harvest would then have replaced. The class correction still lands
-    (that much is a genuine fix to metadata), but the label keeps its provenance
-    and the harvest leaves it alone.
+    A baseline with no ``labelSource`` is authored ground truth and is never
+    demoted: nothing predicted it, so there is nothing to correct and overwriting it
+    would replace authoritative data with a machine guess. The class correction
+    still lands, but the label keeps its provenance and the harvest skips it.
     """
     prefix = f"{test_set_id}/baseline/{object_key}/sections/"
     paginator = s3_client.get_paginator("list_objects_v2")
@@ -971,10 +918,9 @@ def _label_job_to_result(item):
 def get_draft_label_job(args):
     """Poll a labeling job, harvesting any newly-finished documents.
 
-    Progress is computed by harvesting on read rather than from a subscription:
-    test-run completion in this system is already poll-based (the results
-    resolver recounts doc items on read), so there is no completion event to
-    hook. Harvesting here keeps the primitive self-contained and idempotent.
+    Test-run completion is poll-based (the results resolver recounts doc items on
+    read), so there is no completion event to hook; progress is computed by
+    harvesting on read, which is idempotent.
     """
     test_set_id = args["testSetId"]
     job_id = args["jobId"]
@@ -1025,10 +971,9 @@ def _walk_confidence(explainability_info):
 def _absent_field_paths(inference_result):
     """Leaf names whose extracted value is absent (null / "" / empty container).
 
-    A field the document genuinely does not contain gets confidence 0.0 with a
-    reason like "No employer EIN found in OCR results". That is a *correct*
-    reading of a blank box, not a low-quality extraction — but it is
-    indistinguishable from real uncertainty once reduced to a number.
+    A field the document does not contain is assessed at confidence 0.0, which is a
+    correct reading of a blank box but indistinguishable from real uncertainty once
+    reduced to a number. Callers exclude these from headline scores.
     """
     absent = set()
 
@@ -1049,19 +994,15 @@ def _absent_field_paths(inference_result):
 
 
 def _min_confidence(explainability_info, inference_result=None):
-    """Lowest confidence among fields the document actually *has* a value for.
+    """Lowest confidence among fields the document actually has a value for.
 
     Returns None when the payload carries no confidence at all (e.g. assessment
-    disabled), so callers can distinguish "no confidence data" from
-    "confidence 0".
+    disabled), so callers can distinguish "no confidence data" from "confidence 0".
 
-    Fields whose extracted value is absent are excluded. Scoring a blank W-2 box
-    as 0.0 confidence dragged whole documents to "0.0%" in the browser even when
-    every populated field scored >0.99 — the number described the emptiest box on
-    the form rather than the quality of the extraction, and it made every
-    generated set look worthless. Those fields keep their 0.0 in
-    explainability_info (the per-field detail is still true); they just no longer
-    define the document's headline score.
+    Absent fields are excluded: their 0.0 describes the emptiest box on the form,
+    not the quality of the extraction, so including it would report 0.0% for a
+    document whose populated fields all score above 0.99. The per-field 0.0 stays in
+    explainability_info; it just does not define the headline score.
     """
     found = _walk_confidence(explainability_info)
     if not found:
@@ -1073,8 +1014,8 @@ def _min_confidence(explainability_info, inference_result=None):
             for c, t, name in _walk_confidence_named(explainability_info)
             if name not in absent
         ]
-        # Fall back to the unfiltered minimum when *every* field is absent, so a
-        # genuinely empty extraction still reports 0 rather than "no data".
+        # An entirely absent extraction falls back to the unfiltered minimum, so it
+        # reports 0 rather than "no data".
         if populated:
             return min(c for c, _ in populated)
     return min(c for c, _ in found)
@@ -1108,10 +1049,9 @@ def _walk_confidence_named(explainability_info):
 def _confidence_threshold(explainability_info, inference_result=None):
     """The configured alert threshold for the weakest field, if it carries one.
 
-    Reported alongside minConfidence so the UI can color against the *config's*
-    threshold instead of hardcoded bands — a 0.85 confidence is failing under a
-    0.9 threshold and passing under 0.8, and inventing constants in the UI would
-    contradict the assessment config on both.
+    Reported alongside minConfidence so the UI colors against the config's threshold
+    rather than hardcoded bands: 0.85 fails under a 0.9 threshold and passes under
+    0.8.
     """
     found = _walk_confidence_named(explainability_info)
     if not found:
@@ -1125,26 +1065,20 @@ def _confidence_threshold(explainability_info, inference_result=None):
     return min(found, key=lambda triple: triple[0])[1]
 
 
-# The bar a field is measured against when its own assessment carries no
-# threshold. Matches the UI's fallback so a document's alert count means the same
-# thing on both sides of the API.
+# The bar a field is measured against when its own assessment carries no threshold.
+# Must match the UI's fallback, or alert counts differ across the API.
 DEFAULT_ALERT_THRESHOLD = 0.8
 
 
 def _alert_counts(explainability_info, inference_result=None):
     """(alerts, fields): how many fields fall below their configured threshold.
 
-    This — not the single lowest score — is how the rest of the product decides a
-    document needs a human: a field below its threshold is an alert, and whether
-    it missed by 2 points or 40 does not change what has to happen. A count also
-    ranks review work in the way an annotator experiences it, since a document
-    with eight weak fields is more work than one with a single weak field at a
-    lower score.
+    The count, not the single lowest score, is what decides a document needs a
+    human, and it ranks review work the way an annotator experiences it: eight weak
+    fields is more work than one weak field at a lower score.
 
-    Absent fields are excluded on the same grounds as in :func:`_min_confidence`:
-    a blank box scores 0.0 with a reason like "no employer EIN found", which is a
-    correct reading rather than an alert, and counting it would make every
-    sparsely-populated form look like it needed review.
+    Absent fields are excluded, as in :func:`_min_confidence` — a blank box is a
+    correct reading rather than an alert.
     """
     found = _walk_confidence_named(explainability_info)
     if not found:
@@ -1164,26 +1098,24 @@ def _alert_counts(explainability_info, inference_result=None):
 
 # ---------------------------------------------------------------------------
 # Review-effort estimator: "how many documents must a human review to reach a
-# target accuracy?" Reads the measured confidence→accuracy curve for this test
-# set (see idp_common.evaluation.confidence_curve) and the set's per-document
-# confidences, and returns the review depth, implied cutoff, effort, audit
-# sample and — crucially — how much the numbers can be trusted.
+# target accuracy?" Reads the measured confidence→accuracy curve for this test set
+# (see idp_common.evaluation.confidence_curve) and the set's per-document
+# confidences, returning review depth, implied cutoff, effort, audit sample and how
+# far the numbers can be trusted.
 # ---------------------------------------------------------------------------
 
 
 def get_annotation_queue(args, event=None):
     """The worst-first annotation queue for one test set.
 
-    Returns the set's documents ordered lowest-confidence first — so each review
-    removes the most expected error — annotated with claim state so several
-    annotators can work the same set in parallel without colliding. Documents
-    already claimed by someone else, or already reviewed, are marked so they drop
-    out of everyone else's "next in queue"; claim-to-lock (``claimReview``) is
-    what actually enforces exclusivity, this query just reflects it.
+    Documents are ordered worst-first, so each review removes the most expected
+    error, and carry claim state so several annotators can work one set in parallel.
+    Documents claimed by someone else or already reviewed drop out of everyone
+    else's "next in queue"; exclusivity itself is enforced by ``claimReview``, which
+    this query only reflects.
 
-    Access is scoped server-side: an ``Annotator`` may only read the queue for a
-    test set in their ``allowedTestSets``. The shareable queue link is therefore
-    a navigation aid, not a credential.
+    Access is scoped server-side to the caller's ``allowedTestSets``, so a shared
+    queue link is a navigation aid and not a credential.
     """
     test_set_id = args["testSetId"]
     limit = max(1, min(int(args.get("limit") or 50), 200))
@@ -1192,8 +1124,8 @@ def get_annotation_queue(args, event=None):
     if not validate_test_set_name(test_set_id):
         raise Exception("Invalid test set id")
 
-    # Enforce test-set scope before reading anything about the set, so an
-    # unauthorized caller learns nothing (not even whether the set exists).
+    # Scope check precedes any read, so an unauthorized caller cannot even learn
+    # whether the set exists.
     assert_can_access_test_set(event, test_set_id)
 
     meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
@@ -1206,11 +1138,9 @@ def get_annotation_queue(args, event=None):
     claims = _claim_state_for_documents(test_set_id, meta, documents)
 
     caller = caller_email(event)
-    # Review operations (claimReview / completeSectionReview) key on the *pipeline*
-    # copy of a document, "{runId}/{filename}", not the test-set key. Return it so
-    # the UI never has to reconstruct that shape itself — the key layout is a
-    # backend detail, and a client rebuilding it would break silently the moment
-    # it changed.
+    # Review operations (claimReview / completeSectionReview) key on the pipeline
+    # copy of a document, "{runId}/{filename}", not the test-set key. It is returned
+    # so no client has to reconstruct that backend key layout.
     run_id = meta.get("labelJobId")
     entries = []
     for doc in documents:
@@ -1223,21 +1153,15 @@ def get_annotation_queue(args, event=None):
             "Review Skipped",
             "Skipped",
         )
-        # "Available" means this caller could claim it next: unreviewed and
-        # either unclaimed or already theirs.
         claimed_by_other = bool(owner) and owner != caller
-        # A pipeline copy only exists for documents the labeling run actually
-        # processed. Ground truth is skipped by draft labeling, so offering a
-        # review key for it produced "Document <runId>/<file> not found" the
-        # moment an annotator reached it in the queue.
+        # A pipeline copy exists only for documents the labeling run processed, and
+        # draft labeling skips documents that already have ground truth. Offering a
+        # review key without one yields "Document <runId>/<file> not found".
         has_pipeline_copy = bool(run_id) and state.get("exists", False)
         entries.append(
             {
                 "objectKey": doc["objectKey"],
                 "inputKey": doc["inputKey"],
-                # None when this document has no pipeline copy to review: either
-                # the set has no labeling run, or the run skipped this document
-                # because it already carried ground truth.
                 "reviewObjectKey": (
                     f"{run_id}/{doc['objectKey']}" if has_pipeline_copy else None
                 ),
@@ -1259,19 +1183,14 @@ def get_annotation_queue(args, event=None):
     def sort_key(entry):
         """Most-alerts-first. Unlabeled sorts first, authored ground truth last.
 
-        Ordered by the number of fields below their configured threshold, not by
-        the single lowest score — a document with eight weak fields is more review
-        work than one with a single weak field at a slightly lower confidence, and
-        the alert count is how the rest of the product decides a document needs a
-        human. minConfidence breaks ties, so equal-alert documents still surface
-        the shakiest one first.
+        Ranked by alert count rather than the single lowest score, since eight weak
+        fields is more review work than one weak field at a lower confidence;
+        minConfidence breaks ties.
 
-        "No confidence" means two different things. An unlabeled document has had
-        nothing attempted, so it needs the most attention. Ground truth was
-        authored rather than predicted — there is no self-assessment to be low and
-        nothing to correct — so it needs the least. Collapsing both to one
-        sentinel pointed annotators at generated ground truth ahead of genuinely
-        uncertain drafts, inverting what worst-first is for.
+        A missing confidence means two different things, so the two must not share a
+        sentinel: an unlabeled document has had nothing attempted and needs the most
+        attention, while authored ground truth was never predicted and needs the
+        least.
         """
         confidence = entry["minConfidence"]
         if confidence is not None:
@@ -1286,16 +1205,14 @@ def get_annotation_queue(args, event=None):
 
     reviewed_count = sum(1 for e in entries if e["reviewed"])
     inspected = len(entries)
-    # The set's real size. Counting only the inspected page would report a
-    # 2008-document set as 500 (the queue cap) and show "0 remaining" once the
-    # first page was reviewed, while most of the set was still untouched.
+    # The set's real size, not the inspected page: the page is capped, so counting it
+    # would report a 2000-document set as the cap and claim "0 remaining" while most
+    # of the set was untouched.
     total = int(meta.get("fileCount", 0) or 0) or inspected
-    # Note: authored ground truth counts toward totalDocs but has no pipeline copy
-    # to claim, so a mixed set cannot currently reach 100% in the progress banner.
-    # Left as-is deliberately — excluding it would contradict
-    # test_uploaded_ground_truth_is_not_counted_as_review_work, which encodes a
-    # live-found regression (an uploaded set reporting itself fully annotated).
-    # Resolving this needs a product decision, not a quiet accounting change.
+    # Authored ground truth counts toward totalDocs but has no pipeline copy to
+    # claim, so a mixed set cannot reach 100% here. Excluding it instead would report
+    # an uploaded set as fully annotated, which
+    # test_uploaded_ground_truth_is_not_counted_as_review_work forbids.
     queue = [e for e in entries if include_completed or not e["reviewed"]]
 
     result = {
@@ -1303,8 +1220,7 @@ def get_annotation_queue(args, event=None):
         "totalDocs": total,
         "inspectedDocs": inspected,
         "reviewedDocs": reviewed_count,
-        # Documents beyond the inspected page have not been reviewed, so they
-        # count as remaining.
+        # Documents beyond the inspected page are unreviewed, so they count here.
         "remainingDocs": max(0, total - reviewed_count),
         "claimedByOthers": sum(
             1
@@ -1312,8 +1228,7 @@ def get_annotation_queue(args, event=None):
             if not e["reviewed"] and e["claimedBy"] and not e["claimedByMe"]
         ),
         "documents": queue[:limit],
-        # The next document this caller should open — the whole point of
-        # "Save & next". None when the queue is drained for them.
+        # The next document this caller can open; None when their queue is drained.
         "nextObjectKey": next((e["objectKey"] for e in queue if e["available"]), None),
         "labelJobStatus": (label_job or {}).get("status"),
         "labelJobLabeled": _as_int((label_job or {}).get("labeled")),
@@ -1331,11 +1246,10 @@ def get_annotation_queue(args, event=None):
 def _collect_queue_documents(test_set_id):
     """Documents in the set with their label metadata, up to the queue cap.
 
-    Time-bounded for the same reason the estimator is: each page reads every
-    section on it from S3, which measured ~24s per 200 documents on `docsplit`, so
-    paging to a larger cap timed the Lambda out. A short queue is workable — an
-    annotator takes documents from the front — where a timeout means the workspace
-    cannot open at all. inspectedDocs tells the UI how much was ranked.
+    Capped and time-bounded because each page reads every section on it from S3
+    (~24s per 200 documents), which times the Lambda out on a large set. A short
+    queue is workable, since annotators take documents from the front; a timeout
+    means the workspace cannot open. inspectedDocs reports how much was ranked.
     """
     documents = []
     next_token = None
@@ -1365,11 +1279,10 @@ def _collect_queue_documents(test_set_id):
 def _claim_state_for_documents(test_set_id, meta, documents):
     """Map objectKey → claim/review state from the HITL document records.
 
-    Review happens against the *pipeline* copy of a document (keyed
-    ``doc#{testRunId}/{filename}``), not the test-set copy, because that is what
-    sendTestRunToReview puts into the review hopper. The set's most recent
-    labeling/scoring run therefore supplies the run prefix; without one there is
-    nothing claimed yet and every document reads as available.
+    Review happens against the pipeline copy of a document
+    (``doc#{testRunId}/{filename}``), not the test-set copy, so the run prefix comes
+    from the set's most recent labeling run. Without one, nothing is claimed and
+    every document reads as available.
     """
     run_id = meta.get("labelJobId")
     if not run_id:
@@ -1379,9 +1292,7 @@ def _claim_state_for_documents(test_set_id, meta, documents):
     resource = boto3.resource("dynamodb")
     state = {}
 
-    # BatchGetItem rather than one GetItem per document: a 500-document queue was
-    # 500 sequential round-trips, which dominated the response time. Batches cap
-    # at 100 keys.
+    # BatchGetItem rather than a GetItem per document; batches cap at 100 keys.
     keys_by_pk = {
         f"doc#{run_id}/{doc['objectKey']}": doc["objectKey"] for doc in documents
     }
@@ -1390,8 +1301,8 @@ def _claim_state_for_documents(test_set_id, meta, documents):
         batch = [{"PK": pk, "SK": "none"} for pk in all_keys[start : start + 100]]
         try:
             pending = {table_name: {"Keys": batch}}
-            # UnprocessedKeys is normal under throttling; retry what came back
-            # short rather than silently reporting those documents as unclaimed.
+            # UnprocessedKeys is normal under throttling; unretried keys would
+            # silently report their documents as unclaimed.
             for _ in range(4):
                 response = resource.batch_get_item(RequestItems=pending)
                 for item in response.get("Responses", {}).get(table_name, []):
@@ -1401,9 +1312,8 @@ def _claim_state_for_documents(test_set_id, meta, documents):
                     state[object_key] = {
                         "owner": item.get("HITLReviewOwner") or "",
                         "status": item.get("HITLStatus") or "",
-                        # Presence of the item is what proves the run actually
-                        # processed this document, which is a precondition for
-                        # claiming it.
+                        # The item's presence proves the run processed this
+                        # document, which is a precondition for claiming it.
                         "exists": True,
                     }
                 pending = response.get("UnprocessedKeys") or {}
@@ -1419,12 +1329,10 @@ def _claim_state_for_documents(test_set_id, meta, documents):
 def estimate_review_effort(args):
     """Server-side estimate for the "set up team annotation" flow.
 
-    Replaces the prototype's fixture interpolation with the stored curve. The
-    estimate always reports its own trustworthiness (``estimateConfidence`` plus
-    the calibration block), because on a cold or miscalibrated set a bare
-    docs-to-review number is actively misleading — it looks measured when it is a
-    prior, and it understates effort when confidence hides errors in the
-    auto-accepted zone.
+    The estimate always reports its own trustworthiness (``estimateConfidence`` plus
+    the calibration block): on a cold or miscalibrated set a bare docs-to-review
+    number looks measured when it is a prior, and understates effort when confidence
+    hides errors in the auto-accepted zone.
     """
     test_set_id = args["testSetId"]
     target_accuracy = float(args.get("targetAccuracy") or 99.0)
@@ -1439,8 +1347,8 @@ def estimate_review_effort(args):
     if not meta:
         raise Exception(f"Test set '{test_set_id}' not found")
 
-    # Default to the config the set is bound to, so the curve matches the
-    # confidence semantics that produced these labels.
+    # Default to the config the set is bound to, so the curve matches the confidence
+    # semantics that produced these labels.
     if not config_version:
         config_version = meta.get("boundConfigVersion")
 
@@ -1453,23 +1361,17 @@ def estimate_review_effort(args):
         _collect_doc_confidences(test_set_id)
     )
 
-    # The set's real size, which may exceed the number of documents sampled for
-    # confidences. These must not be conflated: reporting the sample size as the
-    # total understates the work (and the effort, and the audit pool) by whatever
-    # factor the set exceeds MAX_DOCS_FOR_ESTIMATE.
+    # The set's real size, which may exceed the sample. Using the sample size as the
+    # total understates the work, the effort and the audit pool by however far the
+    # set exceeds MAX_DOCS_FOR_ESTIMATE.
     total_docs = int(meta.get("fileCount", 0) or 0) or len(doc_confidences)
-    # Ground truth is not reviewable work, so it comes off the total rather than
-    # counting as documents awaiting review.
+    # Ground truth is not reviewable work, so it comes off the total.
     total_docs = max(0, total_docs - ground_truth_docs)
     sampled_docs = len(doc_confidences)
 
-    # When only a sample was read, treat it as representative and extrapolate its
-    # confidence distribution across the whole set, so the ordering the estimator
-    # walks has one entry per real document. Repeating the sample preserves its
-    # shape, which is what the estimate depends on — the alternative (estimating
-    # from the sample and scaling the answer) would also have to scale the
-    # residual-error curve, and would silently assume the untouched documents
-    # look like the sampled ones anyway.
+    # A sample is treated as representative and repeated across the whole set, so the
+    # ordering the estimator walks has one entry per real document. Repetition
+    # preserves the distribution's shape, which is what the estimate depends on.
     if doc_confidences and sampled_docs < total_docs:
         repeats = -(-total_docs // sampled_docs)  # ceil
         doc_confidences = (doc_confidences * repeats)[:total_docs]
@@ -1493,8 +1395,7 @@ def estimate_review_effort(args):
     result["targetAccuracy"] = target_accuracy
     result["configVersion"] = config_version
     result["reliabilityTable"] = curve.reliability_table(prior)
-    # Surfaced so a caller can say "estimated from a 500-document sample" rather
-    # than implying every document was inspected.
+    # Surfaced so a caller can say how much of the set was actually inspected.
     result["sampledDocs"] = sampled_docs
     logger.info(
         f"estimateReviewEffort({test_set_id}, target={target_accuracy}): "
@@ -1504,46 +1405,31 @@ def estimate_review_effort(args):
     return result
 
 
-# Cap on how many documents the estimator will read confidences for. The
-# estimate is a planning number, not an audit: past this many documents the
-# sample is more than enough to shape the curve, and reading every section of a
-# 5,000-document set would blow the resolver's timeout.
-#
-# Measured on `docsplit` (500 documents, 2 sections each, so 1,000 baseline
-# objects): a 200-document page costs ~24s, because each document's sections are
-# read from S3 to recover their confidence. Reaching a 500-document sample took
-# three sequential pages — ~72s against a 60s Lambda timeout, so the estimate
-# never returned and the modal reported "Failed to calculate the review estimate".
-#
-# 200 keeps the whole call inside one page for every pre-deployed set. A sample
-# that size already pins the curve: the reliability table is 10 bins, and the
-# effort model stops measuring document shape after 20 sections. The cost of the
-# smaller sample is a wider docs-to-review range on very large sets, which the
-# estimate already reports honestly via sampledDocs and estimateConfidence —
-# strictly better than returning nothing.
+# Cap on how many documents the estimator reads confidences for. Each document's
+# sections are read from S3, costing ~24s per 200-document page, so a larger cap
+# needs several pages and exceeds the resolver's 60s timeout. 200 keeps the call
+# inside one page and already pins the curve (10 reliability bins; document shape is
+# measured from at most 20 sections). The cost is a wider docs-to-review range on
+# very large sets, which sampledDocs and estimateConfidence report.
 MAX_DOCS_FOR_ESTIMATE = 200
 
 # Hard stop for any operation that pages the document list, independent of the
-# document cap. Even at a smaller cap a set whose pages are unusually slow must
-# not spend the whole invocation collecting; better a narrower sample than a
-# timeout. Shared by the estimator and the annotation queue, which page
-# identically.
+# document cap: a set whose pages are unusually slow must yield a narrower sample
+# rather than a timeout. Shared by the estimator and the annotation queue.
 SAMPLING_TIME_BUDGET_SECONDS = 25
 
 
 def _collect_doc_confidences(test_set_id):
     """Per-document minimum confidence, plus observed doc shape for the effort model.
 
-    Reuses the same baseline read the document list uses, so the estimator orders
-    documents exactly as the reviewer will see them — an estimate computed from a
-    different ordering than the one the UI presents would not describe the work
-    the user is actually about to do.
+    Reuses the same baseline read as the document list, so the estimator orders
+    documents exactly as the reviewer will see them; an estimate over a different
+    ordering would not describe the work the user is about to do.
 
-    Returns ``(confidences, fields_per_doc, pages_per_doc, ground_truth_docs)``.
-    The two shape figures fall back to the module defaults when the baseline
-    carries nothing to measure them from. ``ground_truth_docs`` is how many
-    inspected documents already carry ground truth and were therefore left out
-    of ``confidences``.
+    Returns ``(confidences, fields_per_doc, pages_per_doc, ground_truth_docs)``. The
+    two shape figures fall back to the module defaults when the baseline carries
+    nothing to measure. ``ground_truth_docs`` counts inspected documents that already
+    have ground truth and are therefore absent from ``confidences``.
     """
     test_set_bucket = os.environ["TEST_SET_BUCKET"]
     documents = []
@@ -1562,9 +1448,8 @@ def _collect_doc_confidences(test_set_id):
         next_token = page.get("nextToken")
         if not next_token:
             break
-        # Stop sampling rather than time the invocation out. A narrower sample
-        # still produces a usable estimate — and says so, via sampledDocs — where
-        # a timeout produces nothing but an error banner.
+        # A narrower sample still produces a usable estimate, and says so via
+        # sampledDocs; a timeout produces nothing.
         if time.monotonic() - started > SAMPLING_TIME_BUDGET_SECONDS:
             logger.warning(
                 f"estimateReviewEffort({test_set_id}): stopped sampling at "
@@ -1585,9 +1470,8 @@ def _collect_doc_confidences(test_set_id):
         else:
             ground_truth_docs += 1
 
-    # Effort model inputs, measured rather than assumed where possible: the
-    # number of fields a reviewer actually has to check drives the time far more
-    # than a global average does.
+    # Effort model input: the number of fields a reviewer has to check drives review
+    # time far more than a global average does, so measure it where possible.
     field_counts = []
     for doc in documents:
         for section in doc.get("sections") or []:
@@ -1605,8 +1489,8 @@ def _collect_doc_confidences(test_set_id):
         if field_counts
         else DEFAULT_FIELDS_PER_DOC
     )
-    # Sections stand in for pages: a section is the unit a reviewer opens, and
-    # the baseline records sections, not page counts.
+    # Sections stand in for pages: the baseline records sections, not page counts,
+    # and a section is the unit a reviewer opens.
     section_counts = [len(doc.get("sections") or []) for doc in documents]
     pages_per_doc = (
         sum(section_counts) / len(section_counts)
@@ -1684,13 +1568,10 @@ def _harvest_label_job(job):
                 config_version=job.get("configVersion") or doc.get("ConfigVersion"),
             ):
                 labeled += 1
-            # Stamp the owning test set onto the pipeline document. Without this
-            # the HITL review Lambda cannot tell that a reviewed document belongs
-            # to a test set, so completeSectionReview silently skips the baseline
-            # write-back, the reviewed-human tag, and the confidence-curve
-            # observation — the save reports success while none of it happens.
-            # Only sendTestRunToReview set this field before, and draft labeling
-            # never goes through that path.
+            # TestSetId on the pipeline document is how completeSectionReview knows
+            # to write back to the baseline, tag the label reviewed-human and record
+            # the curve observation; without it the save reports success and does
+            # none of that.
             if not doc.get("TestSetId"):
                 tracking_table.update_item(
                     Key={"PK": f"doc#{job_id}/{file_name}", "SK": "none"},
@@ -1720,8 +1601,7 @@ def _harvest_label_job(job):
     meta_expr = "SET labelJobStatus = :s"
     meta_values = {":s": status}
     if status == "COMPLETED":
-        # The set now carries machine labels; publishing freezes them as-is and
-        # flags them as unreviewed.
+        # The set now carries machine labels; publishing freezes them as unreviewed.
         meta_expr += ", labelState = :ls"
         meta_values[":ls"] = "draft"
     db_client.update_item(
@@ -1775,11 +1655,10 @@ def _write_draft_labels_for_doc(
         inference = result.get("inference_result")
         min_conf = _min_confidence(explainability, inference)
         result["labelSource"] = LABEL_SOURCE_DRAFT
-        # Record which config produced these labels. completeSectionReview reads
-        # metadata.config_version to key the confidence curve, so without this
-        # every review observation landed in the version-agnostic _aggregate curve
-        # while scoring observations went to the per-version one — the two halves
-        # of the calibration signal never combined.
+        # completeSectionReview keys the confidence curve on
+        # metadata.config_version, so without it review observations land in the
+        # version-agnostic curve while scoring observations go to the per-version
+        # one, and the two halves of the calibration signal never combine.
         if config_version:
             metadata = result.get("metadata")
             if not isinstance(metadata, dict):
@@ -1814,18 +1693,15 @@ def _prune_superseded_draft_sections(
 ):
     """Delete draft sections a previous run wrote that this one did not produce.
 
-    Draft labeling writes one object per section, so a re-run that produces
-    *fewer* sections than the last one leaves the extras behind. They are not
-    inert: a document's confidence is the minimum across its sections, so a stale
-    0.50 orphan keeps the document reading 50% even after a corrected run scores
-    every real field above 0.94 — the fix is applied but invisible. Orphans also
-    stay in the annotation queue and in scoring as sections of a document that no
-    longer has them.
+    Draft labeling writes one object per section, so a re-run producing fewer
+    sections leaves orphans behind. They are not inert: a document's confidence is
+    the minimum across its sections, so a stale low-confidence orphan holds the
+    document's score down after a corrected run, and it still appears in the
+    annotation queue and in scoring.
 
-    Only a document's own ``draft-machine`` sections are eligible. Ground truth
-    (uploaded, generated, or ``reviewed-human``) is never touched, and this only
-    runs when the current run wrote at least one section for the document, so a
-    partial failure cannot empty an existing baseline.
+    Only the document's own ``draft-machine`` sections are eligible; ground truth is
+    never touched. Runs only when this run wrote at least one section, so a partial
+    failure cannot empty an existing baseline.
     """
     prefix = f"{test_set_id}/baseline/{file_name}/sections/"
     try:
@@ -1844,8 +1720,7 @@ def _prune_superseded_draft_sections(
         section_id = key[len(prefix) :].split("/")[0]
         if section_id in written_section_ids:
             continue
-        # Never prune anything this run could not have written: only a prior
-        # machine draft is disposable.
+        # Only a prior machine draft is disposable.
         if _existing_label_is_human(test_set_bucket, key):
             continue
         try:
@@ -1864,11 +1739,9 @@ def _prune_superseded_draft_sections(
 def _existing_label_is_human(bucket, key):
     """True if an existing baseline label must not be overwritten by a draft.
 
-    Anything already present counts as human-owned **unless** it is explicitly
-    tagged as a machine draft. A hand-uploaded baseline carries no labelSource at
-    all, and treating that as writable would let draft labeling silently destroy
-    the ground truth a user supplied — so absence of the tag is protective, not
-    permissive. Only a prior draft-machine label is safe to replace.
+    Anything present counts as human-owned unless explicitly tagged a machine draft.
+    An uploaded baseline carries no labelSource at all, so absence of the tag is
+    protective, not permissive: only a prior draft-machine label is replaceable.
     """
     try:
         body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
@@ -1877,8 +1750,7 @@ def _existing_label_is_human(bucket, key):
     try:
         return json.loads(body).get("labelSource") != LABEL_SOURCE_DRAFT
     except Exception:
-        # Existing but unparseable: leave it alone rather than clobbering data we
-        # can't inspect.
+        # Present but unparseable: not safe to clobber.
         return True
 
 
@@ -1906,10 +1778,9 @@ def _fail_label_job(job, message):
 def remove_documents_from_test_set(args):
     """Remove named documents from a test set (delete input + baseline objects).
 
-    Deletes, for each requested file name, the ``{id}/input/<file>`` object and
-    the whole ``{id}/baseline/<file>/`` folder, then recounts and updates
-    fileCount. Editing membership targets the mutable working draft; a later
-    publish cuts the next immutable version. Additive — no existing path changes.
+    Deletes, for each requested file name, the ``{id}/input/<file>`` object and the
+    whole ``{id}/baseline/<file>/`` folder, then recounts fileCount. Membership edits
+    target the mutable working draft; a later publish cuts the next version.
     """
     test_set_id = args["testSetId"]
     file_names = args["fileNames"]
@@ -1925,9 +1796,8 @@ def remove_documents_from_test_set(args):
     removed = 0
     for file_name in file_names:
         keys_to_delete = []
-        # The single input object.
         keys_to_delete.append(f"{test_set_id}/input/{file_name}")
-        # The baseline folder for this file (may contain nested section results).
+        # The baseline folder may contain nested section results.
         paginator = s3_client.get_paginator("list_objects_v2")
         for page in paginator.paginate(
             Bucket=test_set_bucket, Prefix=f"{test_set_id}/baseline/{file_name}/"
@@ -1936,7 +1806,7 @@ def remove_documents_from_test_set(args):
                 keys_to_delete.append(obj["Key"])
 
         if keys_to_delete:
-            # delete_objects caps at 1000 keys/request; batch to be safe.
+            # delete_objects caps at 1000 keys per request.
             for i in range(0, len(keys_to_delete), 1000):
                 s3_client.delete_objects(
                     Bucket=test_set_bucket,
@@ -1946,8 +1816,7 @@ def remove_documents_from_test_set(args):
                 )
             removed += 1
 
-    # Recount remaining inputs and update the metadata pointer. Only the count
-    # is used here, and an unlabeled set must still recount correctly.
+    # Only the count is used, so an unlabeled set must still recount.
     validation = _validate_test_set_files(
         s3_client, test_set_bucket, test_set_id, allow_unlabeled=True
     )
@@ -1979,17 +1848,12 @@ def remove_documents_from_test_set(args):
 def clear_draft_labels(args):
     """Delete a test set's machine draft labels, keeping its documents.
 
-    Re-labeling a set with a corrected config is the common loop while tuning
-    one, but the harvest only *replaces* a draft when the new run produces a
-    section for it — so a run that splits a document differently leaves the old
-    sections behind, and orphans keep dragging the document's confidence down.
-    Until now the only way back to a clean unlabeled set was deleting and
-    recreating it, or a script.
+    The harvest replaces a draft only when the new run produces a section for it, so
+    a run that splits a document differently leaves orphans that drag the document's
+    confidence down; this returns the set to a clean unlabeled state.
 
     Only ``draft-machine`` labels are removed. Reviewed, uploaded and generated
-    ground truth is left alone: this is for discarding machine output, not for
-    throwing away human work, and an annotator's corrections must not be
-    collateral damage of a config retry.
+    ground truth survives, so a config retry cannot discard human work.
     """
     test_set_id = args["testSetId"]
     if not validate_test_set_name(test_set_id):
@@ -2025,7 +1889,7 @@ def clear_draft_labels(args):
         )
 
     kept = len(candidates) - len(to_delete)
-    # Drop the label-job pointer too, or the set keeps reporting a job whose
+    # Without dropping the label-job pointer the set keeps reporting a job whose
     # output no longer exists.
     db_client.update_item(
         key={"PK": f"testset#{test_set_id}", "SK": "metadata"},
@@ -2052,9 +1916,8 @@ def clear_draft_labels(args):
 def _existing_label_is_draft(test_set_bucket, key):
     """True when this label is explicitly a machine draft.
 
-    Deliberately not "not human": a baseline with no labelSource at all was
-    supplied as ground truth when the set was created, and deleting it would
-    destroy data the user provided.
+    Not the inverse of "human": a baseline with no labelSource is ground truth
+    supplied when the set was created, and deleting it would destroy user data.
     """
     try:
         body = s3_client.get_object(Bucket=test_set_bucket, Key=key)["Body"].read()
@@ -2164,16 +2027,11 @@ def delete_test_sets(args):
     test_set_bucket = os.environ["TEST_SET_BUCKET"]
 
     for test_set_id in test_set_ids:
-        # Delete files from test set bucket.
-        #
-        # Both APIs used here are page-limited, so both must be looped:
-        #   * list_objects_v2 returns at most 1000 keys per call
-        #   * delete_objects accepts at most 1000 keys per call
-        # A single unpaginated pass silently orphaned every object past the
-        # first 1000 — the DynamoDB record disappeared from the UI while the
-        # files stayed in the bucket, invisible and still billed. Real test sets
-        # exceed this easily: Fake-W2-Tax-Forms is 2000 documents (~4000 objects
-        # counting baselines).
+        # Delete files from test set bucket. Both APIs cap at 1000 keys per call
+        # (list_objects_v2 and delete_objects), so both must be looped: an
+        # unpaginated pass orphans every object past the first 1000, leaving files
+        # in the bucket after the DynamoDB record is gone. Test sets of a few
+        # thousand objects are routine.
         try:
             deleted_count = 0
             continuation_token = None
@@ -2193,9 +2051,6 @@ def delete_test_sets(args):
                     )
                     if key
                 ]
-                # One list page is at most 1000 keys, which is also the
-                # delete_objects maximum, so this is a single batch in practice —
-                # the slice keeps it correct regardless.
                 for i in range(0, len(objects_to_delete), 1000):
                     batch = objects_to_delete[i:i + 1000]
                     s3_client.delete_objects(
@@ -2208,8 +2063,7 @@ def delete_test_sets(args):
                     break
                 continuation_token = response.get('NextContinuationToken')
                 if not continuation_token:
-                    # Defensive: a truncated response without a token would
-                    # otherwise loop forever.
+                    # A truncated response without a token would loop forever.
                     logger.warning(
                         f"Truncated listing without a continuation token for "
                         f"test set {test_set_id}; stopping after {deleted_count} objects"
@@ -2318,8 +2172,7 @@ def get_test_sets():
                 ),  # Include error message for failed test sets
                 "lastAddResult": item.get("lastAddResult"),
                 "documentClassType": item.get("documentClassType"),
-                # Optional: a test set may declare which configuration version Test
-                # Studio should preselect for it. Absent for the stack-managed
+                # Optional preselected config version. Absent for the stack-managed
                 # benchmark sets, which rely on the id==version-name convention.
                 "configVersion": item.get("configVersion"),
             }
@@ -2355,10 +2208,8 @@ def get_test_sets():
                         s3_client, test_set_bucket, prefix
                     )
 
-                    # Validate file matching and get counts. A set with no
-                    # baseline at all is valid-but-unlabeled (the
-                    # upload-documents-only on-ramp), so it registers and can be
-                    # draft-labeled rather than being rejected as FAILED.
+                    # A set with no baseline is valid-but-unlabeled, so it registers
+                    # and can be draft-labeled rather than being marked FAILED.
                     validation_result = _validate_test_set_files(
                         s3_client, test_set_bucket, prefix, allow_unlabeled=True
                     )
@@ -2470,14 +2321,12 @@ def get_test_set_documents(args):
     test_set_id = args["testSetId"]
     limit = args.get("limit") or 100
     next_token = args.get("nextToken")
-    # Optional exact-match filter: return just this document (used by the UI's
-    # document detail page when deep-linked, so it doesn't page through the
-    # whole set to find one doc).
+    # Optional exact-match filter, so a deep-linked document detail page does not
+    # page through the whole set.
     object_key = args.get("objectKey")
 
-    # The id is derived from a validated name (validate_test_set_name), so it
-    # must match the same charset (with '-' for spaces). Rejects '/' and '..'
-    # so it can't traverse outside the test set's S3 prefix.
+    # The id is derived from a validated name, so it must satisfy the same charset.
+    # This also rejects '/' and '..', which could traverse outside the S3 prefix.
     if not validate_test_set_name(test_set_id):
         raise Exception("Invalid test set id")
     if object_key and ".." in object_key:
@@ -2493,8 +2342,7 @@ def get_test_set_documents(args):
 
     list_kwargs = {
         "Bucket": test_set_bucket,
-        # Exact-name prefix narrows the listing to (at most) the one document;
-        # the objectKey equality check below drops same-prefix siblings.
+        # The objectKey equality check below drops same-prefix siblings.
         "Prefix": f"{input_prefix}{object_key}" if object_key else input_prefix,
         "MaxKeys": limit,
     }
@@ -2560,11 +2408,8 @@ def get_test_set_documents(args):
         "nextToken": response.get("NextContinuationToken"),
     }
 
-    # Surface any in-flight labeling job so a page load can resume polling it.
-    # Labels are harvested on read, so a job only advances while something polls;
-    # a browser refresh mid-run previously dropped the poll and left the job
-    # RUNNING forever, which the Test Sets list then reported as "Labeling"
-    # indefinitely even though every document had finished.
+    # Surfaced so a page load resumes polling an in-flight job. Labels are harvested
+    # on read, so a job that nothing polls stays RUNNING forever.
     meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
     if meta and meta.get("labelJobStatus") == "RUNNING" and meta.get("labelJobId"):
         result["activeLabelJobId"] = meta["labelJobId"]
@@ -2579,17 +2424,16 @@ def get_test_set_documents(args):
 def _attach_label_metadata(test_set_bucket, documents):
     """Add labelSource, alert counts and minConfidence to each document on a page.
 
-    The label state lives inside each section's baseline result.json, so this
-    reads them — bounded to one page of documents (<=1000 sections) and fetched
-    concurrently, since the calls are pure I/O and would otherwise serialize
-    into a slow page load.
+    Label state lives inside each section's baseline result.json, so those are read
+    here — bounded to one page of documents and fetched concurrently, since the calls
+    are pure I/O.
 
-    Alert counts sum across a document's sections (a document with weak fields in
-    two sections is more review work than one), while minConfidence takes the
-    minimum: it names the single weakest field, so an average would hide it.
+    Alert counts sum across a document's sections, since weak fields in two sections
+    is more review work than in one; minConfidence takes the minimum, because it
+    names the single weakest field.
 
-    Best-effort per section: an unreadable result.json leaves that section out
-    rather than failing the whole listing.
+    Best-effort per section: an unreadable result.json is skipped rather than failing
+    the listing.
     """
     tasks = []
     for doc in documents:
@@ -2624,24 +2468,19 @@ def _attach_label_metadata(test_set_bucket, documents):
             if not result:
                 continue
             bucket_for_doc = per_doc[id(doc)]
-            # A baseline with no labelSource was supplied as ground truth when the
-            # set was created (zip upload, pattern-based, or synthetic) — it is
-            # authoritative, but nobody reviewed it *here*. Reporting it as
-            # LABEL_SOURCE_UPLOADED rather than reviewed-human keeps that
-            # distinction: overwrite safety still protects it (see
-            # _existing_label_is_human, which only replaces explicit drafts),
-            # while the annotation queue does not count it as completed review
-            # work and claim 100% progress on a set nobody has annotated.
+            # A baseline with no labelSource is ground truth supplied when the set was
+            # created: authoritative, but not reviewed here. Reporting it as
+            # LABEL_SOURCE_UPLOADED rather than reviewed-human keeps overwrite safety
+            # (via _existing_label_is_human) without letting the annotation queue
+            # count it as completed review work.
             bucket_for_doc["sources"].append(
                 result.get("labelSource") or LABEL_SOURCE_UPLOADED
             )
             inference = result.get("inference_result")
-            # Recompute rather than trusting a stored minConfidence: labels
-            # written before absent fields were excluded carry a 0.0 that came
-            # from a blank box, and reading it back would keep reporting "0.0%"
-            # for documents whose populated fields all score >0.99. Recomputing
-            # repairs those in place; the stored value is only a fallback for
-            # payloads with no explainability_info to recompute from.
+            # Recomputed rather than read back, because a stored minConfidence may
+            # predate the exclusion of absent fields and carry a 0.0 from a blank box.
+            # The stored value is only a fallback when there is no
+            # explainability_info to recompute from.
             confidence = _min_confidence(result.get("explainability_info"), inference)
             if confidence is None:
                 confidence = result.get("minConfidence")
@@ -2695,13 +2534,11 @@ def _is_valid_test_set_structure(s3_client, bucket, prefix):
     and validates a test set before all files (especially baselines) are uploaded.
     See: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193
 
-    baseline/ is NOT required: a set uploaded as documents-only is a legitimate
-    unlabeled set awaiting generateDraftLabels. Requiring it here made such sets
-    invisible to discovery entirely. The .uploading marker (written by the CLI
-    and the UI upload path) is what protects against reading a half-done upload,
-    so dropping the baseline requirement doesn't reintroduce that race. A
-    partially-labeled set is still reported as FAILED by
-    _validate_test_set_files.
+    baseline/ is not required: a documents-only set is a legitimate unlabeled set
+    awaiting generateDraftLabels, and requiring it would hide such sets from
+    discovery. The .uploading marker, not the presence of baselines, is what guards
+    against reading a half-done upload. A partially-labeled set is still reported as
+    FAILED by _validate_test_set_files.
     """
     try:
         # Check for upload-in-progress marker
@@ -2733,12 +2570,10 @@ def _validate_test_set_files(s3_client, bucket, prefix, allow_unlabeled=False):
     (including extension). For example, input file 'doc.png' requires baseline folder 'doc.png/'.
     Any file extension is supported, and mixed extensions within a test set are allowed.
 
-    ``allow_unlabeled=True`` permits a set with **no** baseline files at all —
-    the "upload documents only, then draft-label them" on-ramp. Such a set is
-    valid but unlabeled: generateDraftLabels runs the active config over it to
-    produce machine labels, which a human then reviews. A *partially* labeled
-    set is still an error either way, since that indicates a botched upload
-    rather than a deliberate label-later flow.
+    ``allow_unlabeled=True`` permits a set with no baseline files at all, which is
+    valid but unlabeled and awaits generateDraftLabels. A partially labeled set is an
+    error either way, since it indicates a botched upload rather than a deliberate
+    label-later flow.
     """
     try:
         input_files = set()

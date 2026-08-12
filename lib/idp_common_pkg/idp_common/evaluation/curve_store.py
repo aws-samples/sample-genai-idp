@@ -6,21 +6,19 @@
 Curves are read and written from three places that live in different deploy
 artifacts — the test-set resolver (to serve an estimate), the review Lambda (to
 fold in a human's verdict), and the test-run aggregation Lambda (to fold in a
-scoring run) — so the storage layout and the merge semantics live here rather
-than being reimplemented three times with slightly different keys.
+scoring run) — so the storage layout and merge semantics are centralized here.
 
-**Keyed by (test set, config version).** Confidence means different things across
-models and prompts, so a curve measured under one configuration must not be
-reused after a config change that shifts those semantics. A curve for an unknown
-config version falls back to the test set's aggregate curve, and then to the
+Curves are keyed by (test set, config version), because confidence means
+different things across models and prompts and a curve measured under one
+configuration must not be reused after a config change shifts those semantics. An
+unknown config version falls back to the test set's aggregate curve, then to the
 global prior, so a cold start still gets an answer.
 
-**Merging is additive.** The curve is a bin-count table, so folding in
-observations is ``+=`` per bin. That makes concurrent updates from several
-reviewers safe to express as DynamoDB ``ADD`` on individual bin counters — no
-read-modify-write race like the one that bit test-set version publishing. The
-tradeoff is that an observation cannot be un-folded; a curve is rebuilt from
-scratch (``reset``) rather than corrected in place.
+Merging is additive: the curve is a bin-count table, so folding in observations is
+``+=`` per bin, expressible as DynamoDB ``ADD`` on individual bin counters and
+therefore safe under concurrent updates from several reviewers. The tradeoff is
+that an observation cannot be un-folded; a curve is rebuilt from scratch
+(``reset``) rather than corrected in place.
 """
 
 from __future__ import annotations
@@ -56,9 +54,8 @@ def test_set_pk(test_set_id: str) -> str:
 class CurveStore:
     """Reads and writes confidence curves on the tracking table.
 
-    Takes a boto3 DynamoDB ``Table`` rather than creating one, so callers in
-    Lambdas that already hold a table resource (and the tests, which hold a moto
-    one) don't end up with a second client.
+    Takes a boto3 DynamoDB ``Table`` rather than creating one, so callers that
+    already hold a table resource don't end up with a second client.
     """
 
     def __init__(self, table: Any):
@@ -77,8 +74,8 @@ class CurveStore:
         """
         item = self._get_item(test_set_pk(test_set_id), curve_sk(config_version))
         if not item and config_version:
-            # Fall back to the set's aggregate curve — better than the global
-            # prior, since it is at least this set's documents.
+            # The set's aggregate curve beats the global prior: it is at least
+            # measured on this set's documents.
             item = self._get_item(test_set_pk(test_set_id), curve_sk(None))
         curve = ConfidenceCurve.from_dict(_item_to_curve_dict(item))
         curve.test_set_id = test_set_id
@@ -158,8 +155,8 @@ class CurveStore:
         """Fold a scoring run's Stickler ECE bins into the stored curve(s).
 
         This is the highest-fidelity source: a scoring run measures the whole
-        confidence range, including the high-confidence zone that worst-first
-        review never reaches.
+        confidence range, including the high-confidence zone worst-first review
+        never reaches.
         """
         staged = ConfidenceCurve()
         accepted = staged.add_ece_bins(bins)
@@ -176,9 +173,8 @@ class CurveStore:
         """Discard a stored curve.
 
         Observations are additive and cannot be individually un-folded, so
-        rebuilding is the only correction path — e.g. after ground truth is
-        found to have been wrong, which would have taught the curve the opposite
-        of the truth.
+        discarding and rebuilding is the only correction path when ground truth
+        turns out to have been wrong.
         """
         self._table.delete_item(
             Key={
@@ -205,10 +201,8 @@ class CurveStore:
     ) -> None:
         """Add a staged curve's counts into the stored item atomically.
 
-        Uses per-bin ``ADD`` rather than reading the curve, adding in Python and
-        writing it back: several reviewers completing sections at once must each
-        contribute, and a read-modify-write would silently drop all but the last
-        writer.
+        Uses per-bin ``ADD`` rather than read-modify-write, which would silently
+        drop all but the last writer when several reviewers finish at once.
         """
         set_parts = ["ItemType = :type", "updatedAt = :now"]
         add_parts = []
@@ -224,9 +218,8 @@ class CurveStore:
                 continue
             add_parts.append(f"correct{index} :c{index}")
             add_parts.append(f"total{index} :t{index}")
-            # DynamoDB rejects float; the counts are small and the fractional
-            # part only arises from ECE-bin ingestion, so a short Decimal is
-            # exact enough and avoids float-repr surprises.
+            # DynamoDB rejects float. Counts are small and only fractional via
+            # ECE-bin ingestion, so a rounded Decimal is exact enough.
             values[f":c{index}"] = Decimal(str(round(staged.correct[index], 4)))
             values[f":t{index}"] = Decimal(str(round(staged.total[index], 4)))
 
@@ -308,16 +301,14 @@ def observations_from_baseline_review(
 ) -> List[Tuple[float, bool]]:
     """Derive curve observations from a human's review of a drafted label.
 
-    A reviewer implicitly labels each field correct or incorrect: a field they
-    left alone was right, a field they changed was wrong. Pairing that verdict
-    with the confidence the model had claimed is precisely the
-    ``(confidence, correct)`` observation the curve needs — and because review is
-    worst-first, these land exactly in the low-confidence bins that matter most
-    for the estimate.
+    A reviewer implicitly labels each field correct or incorrect: a field they left
+    alone was right, a field they changed was wrong. Paired with the confidence the
+    model claimed, that is the ``(confidence, correct)`` observation the curve
+    needs. Because review is worst-first, these land in the low-confidence bins.
 
     Only fields present in the drafted result with a recorded confidence
-    contribute; a field the reviewer added had no prediction to be right or
-    wrong about.
+    contribute; a field the reviewer added had no prediction to be right or wrong
+    about.
     """
     if not before or not after:
         return []
@@ -357,9 +348,9 @@ def _flatten_confidences(node: Any, prefix: str = "") -> Dict[str, float]:
             found.update(_flatten_confidences(child, path))
     elif isinstance(node, list):
         for index, child in enumerate(node):
-            # Index into the path so a table row's field stays distinct, but
-            # only when the list carries more than one element — a single-element
-            # wrapper (how explainability_info arrives) should not add a level.
+            # Index into the path so a table row's field stays distinct, but only
+            # for multi-element lists: explainability_info arrives wrapped in a
+            # single-element list, which must not add a path level.
             path = prefix if len(node) == 1 else f"{prefix}[{index}]"
             found.update(_flatten_confidences(child, path))
     return found

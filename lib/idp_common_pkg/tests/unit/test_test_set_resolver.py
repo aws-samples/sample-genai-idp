@@ -341,12 +341,10 @@ class TestTestSetResolver:
     def test_delete_test_sets_paginates_beyond_1000_objects(self):
         """Every object is deleted, not just the first list page.
 
-        Both S3 APIs involved are page-limited at 1000: list_objects_v2 returns
-        at most 1000 keys, and delete_objects accepts at most 1000. A single
-        unpaginated pass orphaned everything past the first page — the test set
-        vanished from the UI while its files stayed in the bucket, invisible and
-        still billed. Real test sets exceed this easily (Fake-W2-Tax-Forms is
-        2000 documents, ~4000 objects counting baselines).
+        Regression: both S3 APIs involved are page-limited at 1000, so an
+        unpaginated pass orphans everything past the first page — the test set
+        disappears while its files stay in the bucket. Real test sets exceed 1000
+        objects easily.
         """
         total_objects = 2500
         keys = [f"big-set/input/doc{i}.pdf" for i in range(total_objects)]
@@ -933,11 +931,10 @@ class TestTestSetResolver:
     def test_concurrent_publishes_get_distinct_versions(self, publish_table):
         """Two interleaved publishes must not collide on one version number.
 
-        Guards the read-modify-write race: allocating from a previously-read
-        latestVersion let both callers write version#000001, so the second
-        silently overwrote the first's supposedly immutable version. The
-        version number is now reserved by an atomic ADD, so interleaving the
-        two reads still yields distinct versions and two surviving items.
+        Regression: allocating from a previously-read latestVersion is a
+        read-modify-write race that lets both callers write version#000001. The
+        number is reserved by an atomic ADD, so interleaved reads still yield
+        distinct versions and two surviving items.
         """
         _seed_test_set(publish_table, "ts1")
 
@@ -1188,9 +1185,9 @@ class TestTestSetResolver:
     def test_min_confidence_handles_the_real_pipeline_shape(self):
         """Compound fields nest another level (PayPeriod.StartDate on a payslip).
 
-        Shape captured from a live stack's explainability_info, where confidence
-        sits beside confidence_threshold/geometry/ocr_confidence — none of which
-        may be mistaken for the score.
+        In explainability_info, confidence sits beside
+        confidence_threshold/geometry/ocr_confidence — none of which may be
+        mistaken for the score.
         """
         payload = [
             {
@@ -1227,13 +1224,12 @@ class TestTestSetResolver:
         assert test_set_index._confidence_threshold(None) is None
 
     def test_min_confidence_ignores_fields_the_document_does_not_have(self):
-        """Found live: whole documents reported "0.0%" because a box was blank.
+        """Regression: a blank field must not score the whole document 0.0.
 
-        A W-2 with no locality gets confidence 0.0 on locality_name with the
-        reason "No locality name found in OCR results" — a correct reading of an
-        empty box, not a bad extraction. Taking the raw minimum made every
-        generated set look worthless in the browser: 8 of 29 fields were null, so
-        the document scored 0.0 while every populated field scored >0.99.
+        A W-2 with no locality gets confidence 0.0 on locality_name — a correct
+        reading of an empty box, not a bad extraction. Taking the raw minimum makes
+        a sparsely-populated document score 0.0 while every populated field scores
+        above 0.99.
         """
         explainability = [
             {
@@ -1315,7 +1311,7 @@ class TestTestSetResolver:
         """Same reason as _min_confidence: a blank box is not an alert.
 
         Counting it would make every sparsely-populated form look like it needed
-        review, which is what made generated W-2 sets read as worthless.
+        review.
         """
         explainability = [
             {
@@ -1897,10 +1893,9 @@ class TestTestSetResolver:
     ):
         """Regression: a large set must not report its sampling cap as its size.
 
-        Found on a live stack: a 2008-document test set reported totalDocs as the
-        sampling cap (MAX_DOCS_FOR_ESTIMATE), which understated the review work,
-        the effort, and the audit pool several-fold. fileCount is the set's size;
-        the sampled confidences are only how much of it we inspected.
+        Reporting MAX_DOCS_FOR_ESTIMATE as totalDocs understates the review work,
+        the effort and the audit pool several-fold. fileCount is the set's size; the
+        sampled confidences are only how much of it was inspected.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=2008)
@@ -1932,16 +1927,11 @@ class TestTestSetResolver:
     ):
         """Regression: the estimate must return a narrower answer, never nothing.
 
-        Found on IDP-dev-stack5 via the UI — "Failed to calculate the review
-        estimate" on `docsplit`. Each document's sections are read from S3 to
-        recover their confidence, which measured ~24s per 200-document page (500
-        documents x 2 sections = 1,000 objects). Reaching the old 500-document
-        sample took three sequential pages, ~72s against a 60s Lambda timeout, so
-        the call died and the modal had nothing to show.
-
-        A time budget bounds the paging independently of the document cap: a
-        smaller sample still yields a usable estimate, and sampledDocs reports how
-        much was inspected.
+        Each document's sections are read from S3 to recover their confidence, so a
+        large sample costs multiple sequential pages of S3 reads and can exceed the
+        Lambda timeout. A time budget bounds the paging independently of the
+        document cap: a smaller sample still yields a usable estimate, and
+        sampledDocs reports how much was inspected.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=600)
@@ -1974,10 +1964,10 @@ class TestTestSetResolver:
     ):
         """The workspace must open with a short queue rather than not at all.
 
-        Same root cause as the estimator timeout, and worse in effect: this is the
-        page an annotator lands on, so a timeout here means they cannot work at
-        all. A truncated queue is fine — they take documents from the front — and
-        inspectedDocs reports how much was ranked.
+        Same S3-read cost as the estimator, but this is the page an annotator lands
+        on, so a timeout here means they cannot work at all. A truncated queue is
+        fine — they take documents from the front — and inspectedDocs reports how
+        much was ranked.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=600)
@@ -2007,8 +1997,8 @@ class TestTestSetResolver:
         """The cap must not require multiple sequential pages.
 
         get_test_set_documents pages at 200, and each page costs a full S3 read of
-        every section on it. A cap above the page size therefore multiplies the
-        wall-clock cost of the estimate — which is exactly what timed out.
+        every section on it, so a cap above the page size multiplies the wall-clock
+        cost of the estimate.
         """
         assert test_set_index.MAX_DOCS_FOR_ESTIMATE <= 200
 
@@ -2026,11 +2016,10 @@ class TestTestSetResolver:
     def test_uploaded_ground_truth_is_not_counted_as_review_work(self, labeling_env):
         """Regression: a set that arrived with labels is not 100% annotated.
 
-        Found live: a 500-document uploaded set reported reviewedDocs=500,
-        remainingDocs=0 and an empty queue, because baselines with no labelSource
-        defaulted to reviewed-human. Uploaded ground truth is authoritative — draft
-        labeling still won't overwrite it — but nobody reviewed it *here*, so it
-        must not claim completed annotation progress.
+        Baselines with no labelSource must not default to reviewed-human, which
+        would report the whole set reviewed with an empty queue. Uploaded ground
+        truth is authoritative — draft labeling still won't overwrite it — but
+        nobody reviewed it here, so it cannot claim annotation progress.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=2)
@@ -2077,9 +2066,9 @@ class TestTestSetResolver:
     def test_queue_reports_the_real_set_size_not_the_inspected_page(self, labeling_env):
         """Regression: the queue cap must not be reported as the set size.
 
-        Same conflation as the estimator had: a 2008-document set showed
-        totalDocs=500, so reviewing the first page would have read as
-        "0 remaining" with most of the set untouched.
+        Same conflation as the estimator: reporting the cap as totalDocs makes
+        reviewing the first page read as "0 remaining" with most of the set
+        untouched.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=2008)
@@ -2160,9 +2149,9 @@ class TestTestSetResolver:
         """A mixed set must only label the documents that need it.
 
         Generated and uploaded ground truth carries no labelSource, which the
-        overwrite guard treats as protected — so labeling them ran inference and
-        then discarded the result. On a mixed set that is wasted spend; on a fully
-        generated set the whole run produced nothing.
+        overwrite guard treats as protected, so labeling them would run inference
+        and discard the result — wasted spend on a mixed set, and an entirely
+        pointless run on a fully generated one.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=3)
@@ -2288,11 +2277,10 @@ class TestTestSetResolver:
     ):
         """The one place a reviewed label is deliberately downgraded.
 
-        The harvest refuses to overwrite reviewed-human labels. Without demoting
-        them, re-extracting a document someone had already confirmed would run to
-        completion and write nothing — reporting success while leaving the
-        wrong-class fields in place. Asking to re-extract after correcting the
-        class IS a statement that the current labels are wrong.
+        The harvest refuses to overwrite reviewed-human labels, so without demoting
+        them a re-extraction of an already-confirmed document would report success
+        while leaving the wrong-class fields in place. Re-extracting after a class
+        correction is itself a statement that the current labels are wrong.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1)
@@ -2335,16 +2323,14 @@ class TestTestSetResolver:
         assert written["document_class"]["type"] == "bank-check"
 
     def test_reextract_never_demotes_authored_ground_truth(self, labeling_env):
-        """Found live on IDP-dev-stack5: re-extracting one document of the
-        pre-deployed realkie-fcc-verified benchmark demoted its VERIFIED label to
-        draft-machine, which the harvest would then have replaced with a machine
-        guess.
+        """Regression: re-extraction must not demote a supplied verified label.
 
         A baseline with no labelSource was supplied when the test set was created —
-        nobody predicted it, so there is nothing for a re-extraction to correct.
-        Only a reviewed-human label is demoted (that one IS a prediction someone
-        confirmed, and the annotator has just said it is wrong). The class
-        correction still lands either way.
+        nobody predicted it, so there is nothing for a re-extraction to correct, and
+        demoting it would let the harvest replace it with a machine guess. Only a
+        reviewed-human label is demoted (that one IS a prediction someone confirmed,
+        and the annotator has just said it is wrong). The class correction lands
+        either way.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1)
@@ -2431,11 +2417,10 @@ class TestTestSetResolver:
     ):
         """Clearing drafts must never be a way to lose annotation work.
 
-        The fear this addresses is real: re-labeling with a corrected config is the
-        normal tuning loop, and if that discarded the team's corrections nobody
-        could safely retry. Only labels explicitly tagged draft-machine go —
+        Re-labeling with a corrected config is the normal tuning loop, so it must be
+        safe to retry. Only labels explicitly tagged draft-machine are cleared —
         deliberately not "everything that isn't reviewed-human", because a baseline
-        with NO labelSource was supplied as ground truth when the set was created.
+        with no labelSource was supplied as ground truth when the set was created.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=3)
@@ -2487,11 +2472,11 @@ class TestTestSetResolver:
     def test_queue_sorts_ground_truth_last_and_unlabeled_first(self, labeling_env):
         """Two kinds of "no confidence" must not sort the same.
 
-        Ground truth was authored, not predicted: there is no self-assessment to
-        be low and nothing for a reviewer to correct, so it belongs at the END.
-        A document with no label at all belongs at the FRONT. Both used to
-        collapse to the same sentinel, which pointed annotators at generated
-        ground truth ahead of the genuinely uncertain drafts.
+        Ground truth was authored, not predicted: there is no self-assessment to be
+        low and nothing for a reviewer to correct, so it belongs at the END. A
+        document with no label at all belongs at the FRONT. Collapsing both to one
+        sentinel points annotators at authored ground truth ahead of the genuinely
+        uncertain drafts.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=3)
@@ -2525,10 +2510,10 @@ class TestTestSetResolver:
     def test_queue_orders_by_alert_count_not_lowest_confidence(self, labeling_env):
         """Review work is the number of fields to check, not the worst score.
 
-        many.pdf has three fields below their threshold; one.pdf has a single
-        weaker field. Ordering by minConfidence puts one.pdf first even though
-        many.pdf is three times the work — which is why the queue counts alerts and
-        uses confidence only to break ties.
+        many.pdf has three fields below their threshold; one.pdf has a single weaker
+        field. Ordering by minConfidence puts one.pdf first even though many.pdf is
+        three times the work, so the queue counts alerts and uses confidence only to
+        break ties.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=2)
@@ -2604,13 +2589,12 @@ class TestTestSetResolver:
     def test_reharvest_prunes_sections_the_new_run_no_longer_produces(
         self, labeling_env
     ):
-        """Found live: orphan sections kept a fixed document reading 50%.
+        """Regression: orphan sections from an earlier run must not mask a fix.
 
         A document's confidence is the minimum across its sections, so a stale
-        0.50 section from an earlier run masked a corrected run that scored every
-        real field above 0.94 — the fix was applied but invisible. Orphans also
-        linger in the annotation queue as sections of a document that no longer
-        has them.
+        low-scoring section hides a corrected run that scored every real field well.
+        Orphans also linger in the annotation queue as sections of a document that no
+        longer has them.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1)
@@ -2779,12 +2763,12 @@ class TestTestSetResolver:
         assert "activeLabelJobId" not in page
 
     def test_queue_gives_no_review_key_to_documents_the_run_skipped(self, labeling_env):
-        """Found live: "Document <runId>/<file> not found" when claiming.
+        """Regression: no review key for a document with no pipeline copy.
 
         Draft labeling skips documents that already carry ground truth, so no
-        pipeline copy exists for them. The queue was handing out a review key for
-        every document whenever the set had *any* labeling run, so an annotator
-        reaching a ground-truth document got a claim failure.
+        pipeline copy exists for them. Handing out a review key for every document
+        whenever the set has *any* labeling run makes claiming such a document fail
+        with "Document <runId>/<file> not found".
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=2, labelJobId="run1")
@@ -2824,11 +2808,9 @@ class TestTestSetResolver:
         """completeSectionReview keys the confidence curve on this.
 
         It reads metadata.config_version off the baseline to decide which curve a
-        review observation belongs to. The harvester never wrote that field, so
-        every review landed in the version-agnostic _aggregate curve while scoring
-        runs wrote to the per-version one — the two halves of the calibration
-        signal never combined. Observed live: fake-w2 had 8048 scoring / 0 review
-        observations, the bank statements 169 review / 0 scoring.
+        review observation belongs to. If the harvester omits that field, reviews
+        land in the version-agnostic _aggregate curve while scoring runs write to the
+        per-version one, and the two halves of the calibration signal never combine.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1)
@@ -2917,12 +2899,12 @@ class TestTestSetResolver:
         assert body["metadata"]["config_version"] == "from-pipeline"
 
     def test_queue_harvests_the_running_label_job(self, labeling_env):
-        """Found live: the queue never advanced draft labeling.
+        """Regression: the queue must itself advance draft labeling.
 
-        Labels are harvested on read, so whoever polls drives the harvest. Only
-        the owner-facing detail page polled — a page an Annotator cannot open —
-        so an annotator who opened the workspace mid-run watched an empty queue
-        that never filled, with the job frozen at 0 labeled.
+        Labels are harvested on read, so whoever polls drives the harvest. If only
+        the owner-facing detail page polls — a page an Annotator cannot open — an
+        annotator opening the workspace mid-run watches an empty queue that never
+        fills, with the job frozen at 0 labeled.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1, labelJobId="ts1-run")
@@ -3039,15 +3021,13 @@ class TestTestSetResolver:
         assert result["labelJobTotal"] is None
 
     def test_harvest_stamps_the_test_set_onto_the_pipeline_document(self, labeling_env):
-        """Without TestSetId, a reviewer's save silently loses everything.
+        """Regression: without TestSetId, a reviewer's save silently loses everything.
 
-        Found live: completeSectionReview reported success and marked the section
-        complete, but the baseline was untouched — still draft-machine with the
-        correction discarded. write_correction_to_test_set_baseline keys on the
-        doc item's TestSetId to find the owning set, and only sendTestRunToReview
-        ever set it; draft labeling never goes through that path. So the
-        write-back, the reviewed-human tag, and the confidence-curve observation
-        were all skipped without an error anywhere.
+        write_correction_to_test_set_baseline keys on the doc item's TestSetId to find
+        the owning set. Draft labeling does not go through sendTestRunToReview, so if
+        it omits TestSetId the write-back, the reviewed-human tag and the
+        confidence-curve observation are all skipped while completeSectionReview
+        still reports success.
         """
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1)

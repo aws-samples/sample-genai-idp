@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * Shared option lists and validators for test-set creation.
- *
- * Extracted from TestSets.tsx so the create wizard and the list page validate
- * identically — these rules mirror server-side checks in
- * nested/api-resolvers/src/lambda/test_set_resolver/index.py
- * (validate_test_set_name / validate_description), and two copies would drift.
+ * Shared option lists and validators for test-set creation, so every entry point
+ * validates identically. The rules mirror validate_test_set_name /
+ * validate_description in
+ * nested/api-resolvers/src/lambda/test_set_resolver/index.py and must be kept in
+ * step with them.
  */
 
 import type { SelectProps } from '@cloudscape-design/components';
@@ -41,10 +40,9 @@ export const validateTestSetName = (name: string): boolean => /^[a-zA-Z0-9\s_-]+
 export const validateDescription = (desc: string): boolean => desc.length <= 500;
 
 /**
- * How a test set is created. Each source produces a materially different
- * starting state, which is what the previous two-dropdown UI obscured — the
- * options were named for their *mechanism* (upload vs existing files) rather
- * than their *outcome* (labeled, needs labeling, synthetic).
+ * How a test set is created. Each source leaves the set in a materially different
+ * state, so the UI names sources by outcome (labeled, needs labeling, synthetic)
+ * rather than by mechanism.
  */
 export type CreateSource = 'upload-labeled' | 'upload-documents' | 'existing-files' | 'generate';
 

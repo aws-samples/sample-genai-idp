@@ -2,22 +2,13 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * ReviewEffortModal — "how much of this set must a human actually review?"
+ * ReviewEffortModal — how much of this set a human must actually review. Sits
+ * between draft labeling and annotation so the owner sizes the commitment before
+ * a team enters the queue.
  *
- * Sits between draft labeling and annotation: labels exist, and the owner now
- * decides how much human effort to spend on them. Without this the only
- * affordance after labeling is "Annotate", which drops someone into a queue with
- * no idea whether they are committing to 4 documents or 2,000.
- *
- * The three coarse choices are the decision most owners actually make; the
- * measured curve behind them is collapsed under "Show the math" for the ones who
- * want it. Every number here comes from estimateReviewEffort — nothing is
- * computed client-side, so the UI cannot drift from the backend's model.
- *
- * The estimate always states how much to trust itself. A figure derived from a
- * generic cross-set prior looks identical to a measured one unless it says
- * otherwise, so estimateConfidence drives a banner rather than the mockup's
- * hardcoded "rough estimate" caveat.
+ * Every number comes from estimateReviewEffort; nothing is computed client-side,
+ * so the UI cannot drift from the backend's model. estimateConfidence drives the
+ * trust banner, since a prior-derived figure otherwise looks measured.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -114,10 +105,7 @@ const formatEffort = (minutes: number): string => {
 const pct = (fraction?: number | null): string =>
   fraction === null || fraction === undefined || !Number.isFinite(fraction) ? '—' : `${(fraction * 100).toFixed(1)}%`;
 
-/**
- * How much the estimate should be trusted. A prior-driven number and a measured
- * one are indistinguishable on screen unless this says so.
- */
+/** Per-estimateConfidence copy for how much the number should be trusted. */
 const CONFIDENCE_COPY: Record<string, { type: 'info' | 'warning' | 'success'; header: string; body: string }> = {
   prior: {
     type: 'warning',
@@ -164,8 +152,7 @@ const ReviewEffortModal = ({ visible, testSetId, configVersion, onDismiss, onCon
           return;
         }
         setEstimate(data);
-        // The backend decides when a small sample is indefensible; respect it
-        // rather than leaving a recommendation the estimate contradicts.
+        // The backend owns the call on when a worst-first sample is indefensible.
         if (data.recommendReviewAll) setStrategy('everything');
       } catch (err) {
         logger.error('Error estimating review effort:', err);

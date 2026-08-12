@@ -3,12 +3,10 @@
 
 """Unit tests for the confidence→accuracy curve and the review-effort estimator.
 
-The estimator's whole value proposition is "review 60 documents, not 120", so
-these tests focus less on arithmetic and more on the properties that make that
-claim safe: that the curve is monotonic where it should be, that a thin curve
-defers to the prior instead of swinging on noise, and — most importantly — that
-the two failure modes which would let the estimator certify an inaccurate set
-are actually detected rather than assumed away.
+These focus less on arithmetic than on the properties that make a partial-review
+recommendation safe: the curve is monotonic where it should be, a thin curve defers
+to the prior instead of swinging on noise, and the failure modes that would let the
+estimator certify an inaccurate set are detected rather than assumed away.
 """
 
 import random
@@ -28,9 +26,8 @@ pytestmark = pytest.mark.unit
 def _calibrated_curve(n=600, seed=7):
     """A well-calibrated curve: P(correct) tracks confidence.
 
-    Beta(9, 1.2) concentrates confidence near 1.0, which is what real extraction
-    output looks like — a uniform distribution would imply ~50% of fields are
-    wrong and make every derived number nonsense.
+    Beta(9, 1.2) concentrates confidence near 1.0, matching real extraction output; a
+    uniform distribution would imply ~50% of fields are wrong.
     """
     rng = random.Random(seed)
     observations = []
@@ -135,14 +132,10 @@ class TestCalibrationHealth:
     def test_undiscriminating_confidence_is_flagged_when_ece_looks_fine(self):
         """The case ECE *and* bin coverage both miss.
 
-        Taken from a live 100-document W-2 A/B: one grader spread scores across 7
-        bins with ECE 0.032 — passing both existing gates — yet AUROC was 0.480,
-        i.e. worse than chance at ranking correctness. All 77 errors sat in the
-        top bin, so worst-first review reached none of them and reviewing 30%
-        found *fewer* errors than reviewing at random (ECARB 0.9x).
-
-        Reproduced here: every error hides in the >=0.9 bin while the flagged
-        low-confidence fields are all actually correct.
+        A grader can spread scores across many bins with a low ECE — passing both
+        of those gates — and still rank correctness worse than chance. Here every
+        error hides in the >=0.9 bin while the flagged low-confidence fields are all
+        actually correct, so worst-first review reaches none of them.
         """
         curve = ConfidenceCurve()
         for index, (n, p_correct) in {
@@ -167,11 +160,11 @@ class TestCalibrationHealth:
         assert not health.reliable
 
     def test_good_ranker_is_reliable_despite_worse_ece(self):
-        """The other arm of the same A/B — worse ECE, far better ranking.
+        """The converse case: worse ECE, far better ranking.
 
-        ECE 0.054 (higher than the undiscriminating arm's 0.032) but AUROC 0.878,
-        with 58% of errors reachable worst-first. Ranking power is what the
-        estimate depends on, so this must read as reliable.
+        A higher ECE than the undiscriminating curve above, but most errors are
+        reachable worst-first. Ranking power is what the estimate depends on, so this
+        must read as reliable.
         """
         curve = ConfidenceCurve()
         for index, (n, p_correct) in {
@@ -427,10 +420,8 @@ class TestEstimateForTarget:
         assert residuals[-1] == pytest.approx(0.0, abs=1e-6)
 
     def test_worst_first_beats_random_order(self):
-        """The core premise: reviewing the worst documents removes more error.
-
-        If this fails, the whole "review 60 not 120" claim is unfounded.
-        """
+        """The core premise: reviewing the worst documents removes more error than
+        reviewing at random. Without it a partial review is not defensible."""
         curve = _calibrated_curve()
         docs = _doc_confidences(120)
         target = 95.0

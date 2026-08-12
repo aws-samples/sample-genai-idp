@@ -262,21 +262,18 @@ export const viewerNavItems = [
 export const reviewerNavItems = [{ type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` }];
 
 /**
- * Navigation for Annotator-only users: their assigned test set's queue and
- * nothing else ("one link, one queue"). Built from the user's allowedTestSets so
- * a single-set annotator lands straight in the queue rather than on a chooser.
- * With several sets, or none resolved yet, fall back to the queue landing page
- * which handles both cases.
+ * Navigation for Annotator-only users: their assigned test set's queue and nothing
+ * else. Built from the user's allowedTestSets so a single-set annotator lands
+ * straight in the queue rather than on a chooser. With several sets, or none
+ * resolved yet, falls back to the queue landing page, which handles both cases.
  */
 export const buildAnnotatorNavItems = (allowedTestSets: string[] | null): Array<Record<string, unknown>> => {
   const items: Array<Record<string, unknown>> = [];
   if (allowedTestSets && allowedTestSets.length === 1) {
-    // "One link, one queue" for the common case.
     items.push({ type: 'link', text: 'My annotation queue', href: testSetAnnotateHref(allowedTestSets[0]) });
-    // Always reachable, even when the shortcut above is taken. The scope this nav
-    // is built from is fetched once on mount, so an annotator assigned a second
-    // set mid-session would otherwise keep being sent straight into the first one
-    // with no way to discover the new assignment short of a reload.
+    // Kept even alongside the single-set shortcut: scope is fetched once on mount,
+    // so an annotator assigned a second set mid-session needs a way to reach it
+    // without reloading.
     items.push({ type: 'link', text: 'All my assignments', href: `#${ANNOTATE_LANDING_PATH}` });
     return items;
   }
@@ -364,8 +361,8 @@ const Navigation = ({
     else if (isAuthor) roleItems = authorNavItems;
     else if (isViewerOnly) roleItems = viewerNavItems;
     else if (isReviewerOnly) roleItems = reviewerNavItems;
-    // Checked before the viewer fallback: an Annotator-only user must land in
-    // their queue, not on a document list they have no access to read.
+    // Before the viewer fallback: an Annotator-only user must land in their queue,
+    // not on a document list they cannot read.
     else if (isAnnotatorOnly) roleItems = buildAnnotatorNavItems(allowedTestSets);
     else roleItems = viewerNavItems; // Default: if user has Viewer + Reviewer, show viewer nav (union)
 
@@ -568,10 +565,9 @@ const Navigation = ({
 
   return (
     <div className="idp-side-nav">
-      {/* Quick Start drives discovery and document upload, which is well outside
-          what an Annotator is scoped to: they may read and annotate their assigned
-          test set(s) and nothing else. Hidden rather than left to fail server-side,
-          so the UI does not advertise a capability the role does not have. */}
+      {/* Quick Start drives discovery and document upload, outside what an
+          Annotator is scoped to. Hidden rather than left to fail server-side, so the
+          UI does not advertise a capability the role does not have. */}
       {isQuickStartWidgetEnabled() && !isAnnotatorOnly && (
         <div className="nav-quick-start">
           <Hotspot hotspotId="nav-quick-start" side="right">

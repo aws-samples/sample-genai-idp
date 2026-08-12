@@ -19,9 +19,9 @@ import { getMyProfile } from '../graphql/generated';
  * the former limits which config versions' documents a user sees, the latter
  * which test sets they may annotate.
  *
- * NOTE: every group name the app understands must appear in APP_GROUPS below —
- * the federated-login refresh path filters against it, and an omitted group makes
- * a real role look like "no role at all".
+ * Every group name the app understands must appear in APP_GROUPS below: the
+ * federated-login refresh path filters against it, so an omitted group makes a real
+ * role look like no role at all.
  */
 
 /** Cognito groups this app understands. Keep in sync with the roles above. */
@@ -36,9 +36,8 @@ interface UserRoleReturn {
   /** True if user is ONLY in the Reviewer group (no Admin/Author/Viewer) */
   isReviewerOnly: boolean;
   /**
-   * True if user is ONLY in the Annotator group. These users are deliberately
-   * dead-ended in their assigned test set's queue — they get a single-link nav
-   * rather than the document list.
+   * True if user is ONLY in the Annotator group. These users get a single-link nav
+   * into their assigned test set's queue rather than the document list.
    */
   isAnnotatorOnly: boolean;
   /** True if user is ONLY in the Viewer group (no Admin/Author) */

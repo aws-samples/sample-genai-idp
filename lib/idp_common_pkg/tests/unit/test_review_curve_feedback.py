@@ -3,13 +3,12 @@
 
 """Tests for the self-correcting loop: HITL review → confidence curve.
 
-The review-effort estimator's central promise is that its numbers improve as a
-team reviews ("self-corrects as your team reviews"). That promise is implemented
-by ``complete_section_review`` recording, for each reviewed field, whether the
-model's prediction survived the human's edit. These tests cover that hand-off,
-including the ordering constraint that makes it possible at all: the previous
-label must be read *before* the corrected one overwrites it, or the evidence of
-what the model predicted is gone.
+The review-effort estimator's numbers improve as a team reviews, implemented by
+``complete_section_review`` recording, for each reviewed field, whether the model's
+prediction survived the human's edit. These tests cover that hand-off, including
+the ordering constraint that makes it possible: the previous label must be read
+*before* the corrected one overwrites it, or the evidence of what the model
+predicted is gone.
 """
 
 import importlib.util
@@ -241,9 +240,8 @@ class TestCurveFeedback:
 class TestRevisionHistory:
     """The audit trail has to land where the viewer can read it.
 
-    Reviewer identity was already recorded in DynamoDB as HITLReviewHistory, but
-    the ground-truth viewer renders provenance from ``_editHistory`` inside the
-    label JSON — so a review saved through this Lambda left no visible trail.
+    The ground-truth viewer renders provenance from ``_editHistory`` inside the label
+    JSON, so the DynamoDB HITLReviewHistory record alone leaves no visible trail.
     """
 
     def test_review_records_who_changed_what_in_the_label(self, review_env):
@@ -270,8 +268,8 @@ class TestRevisionHistory:
         assert entry["editedBy"] == "annotator1"
         assert entry["editedByEmail"] == "annotator1@example.com"
         assert entry["source"] == "annotation-review"
-        # The diff is what makes the trail useful: Spencer's case is spotting a
-        # field the team keeps correcting, which points at a config gap.
+        # The diff is what makes the trail useful: a field that keeps being
+        # corrected points at a config gap.
         diffs = entry["baselineEdits"]["diffs"]
         assert diffs["total"] == {"originalValue": "100", "newValue": "142.50"}
         assert "vendor" not in diffs, "an untouched field is not a change"
@@ -305,9 +303,8 @@ class TestRevisionHistory:
     def test_a_client_that_drops_history_cannot_erase_it(self, review_env):
         """The trail belongs to the server, not to whatever the client posts.
 
-        Found by test: the entry was originally appended to the *incoming* body, so
-        any client that did not round-trip _editHistory silently wiped every prior
-        reviewer's record — the exact failure an audit trail exists to prevent.
+        Regression: appending the entry to the *incoming* body lets any client that
+        does not round-trip _editHistory wipe every prior reviewer's record.
         """
         module, table, s3 = review_env
         _seed_review_doc(table, s3)
@@ -401,9 +398,9 @@ class TestRecordCurveObservations:
 class TestAnnotatorReviewScope:
     """An Annotator may only review documents in their assigned test set.
 
-    Group membership gets them to the operation; these tests cover the second
-    gate, which is what stops an annotator onboarded for one labeling effort from
-    reviewing production documents or another customer's set.
+    Group membership gets them to the operation; these tests cover the second gate,
+    which stops an annotator onboarded for one labeling effort from reviewing
+    production documents or another test set.
     """
 
     @pytest.fixture

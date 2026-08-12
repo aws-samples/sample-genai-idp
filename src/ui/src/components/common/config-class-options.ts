@@ -4,10 +4,9 @@
 /**
  * The document classes a config version defines, as dropdown options.
  *
- * Shared by human review (SectionsPanel) and Test Studio annotation
- * (GroundTruthVisualEditor): both let a user correct a misclassified section, and
- * both must offer exactly the classes the bound config knows about — a free-text
- * class that the config has no schema for cannot be extracted against.
+ * Shared by human review and Test Studio annotation: both correct a misclassified
+ * section, and both must offer exactly the classes the bound config knows about,
+ * because a class the config has no schema for cannot be extracted against.
  */
 
 export interface ConfigClassOption {
@@ -21,10 +20,8 @@ interface ConfigWithClasses {
 }
 
 /**
- * Handles both config shapes in the wild: JSON Schema classes name themselves
- * with `$id` or `x-aws-idp-document-type`, pre-migration ones with `name`.
- * Descriptions come along so the class can be chosen without leaving the
- * dropdown.
+ * Handles both config shapes in the wild: JSON Schema classes name themselves with
+ * `$id` or `x-aws-idp-document-type`, pre-migration ones with `name`.
  */
 export const getConfigClassOptions = (config?: ConfigWithClasses | null): ConfigClassOption[] => {
   const classes = config?.classes;

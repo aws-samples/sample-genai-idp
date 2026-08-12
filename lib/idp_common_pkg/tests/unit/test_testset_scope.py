@@ -3,12 +3,11 @@
 
 """Tests for per-user test-set scope (``allowedTestSets``).
 
-This is a security boundary, not a convenience: the annotation queue's "share a
-link with your annotator" story is only safe because the server refuses
-out-of-scope access on every operation. So these tests are written adversarially
-— most of them are attempts to reach a test set the caller was not assigned —
-and they assert the *deny* direction, including for the states where a naive
-implementation would fail open (no scope recorded, lookup error, unknown role).
+This is a security boundary: sharing an annotation-queue link is only safe because
+the server refuses out-of-scope access on every operation. These tests are written
+adversarially — most are attempts to reach a test set the caller was not assigned —
+and assert the *deny* direction, including the states where a naive implementation
+would fail open (no scope recorded, lookup error, unknown role).
 """
 
 import time
@@ -119,9 +118,8 @@ class TestAnnotatorScope:
     def test_annotator_with_no_scope_is_denied_everything(self, users_table):
         """Fails closed.
 
-        An annotator whose scope was never set — a half-finished onboarding, or a
-        revoked assignment — must be denied, not handed unrestricted access. The
-        opposite default would turn a misconfiguration into a data leak.
+        An annotator whose scope was never set — half-finished onboarding, or a
+        revoked assignment — must be denied, not handed unrestricted access.
         """
         _seed_user(users_table, "ann@example.com", allowed=None)
         with pytest.raises(TestSetAccessDenied, match="not assigned to any test set"):
@@ -156,8 +154,8 @@ class TestOtherRoles:
     def test_reviewer_gets_no_test_set_access(self, users_table):
         """Production HITL review is a different axis and grants nothing here.
 
-        A Reviewer can review production documents; that must not imply access
-        to a customer's ground-truth test sets.
+        A Reviewer can review production documents; that must not imply access to
+        ground-truth test sets.
         """
         with pytest.raises(TestSetAccessDenied, match="requires Admin, Author"):
             assert_can_access_test_set(
@@ -201,9 +199,8 @@ class TestScopeLookup:
     def test_lookup_failure_denies_an_annotator(self, users_table):
         """An unreadable users table must not grant access.
 
-        A sibling resolver documents the inverse hazard for config-version scope
-        (AccessDenied → caught → silently unrestricted). Here the same failure
-        removes access instead.
+        A caught lookup error must remove access rather than leaving the caller
+        silently unrestricted.
         """
 
         class Broken:
@@ -268,12 +265,9 @@ class TestScopeCacheAsymmetry:
     """Being slow to revoke is a deliberate trade; being slow to grant is a bug.
 
     The cache exists because scope is read on every queue read and every review
-    operation. Its TTL bounds how long a REVOKED annotator keeps access, which is
-    the direction that matters for security. Caching a *denial* for that same
-    duration had no such justification and produced the opposite of a security
-    property: an annotator who tried before being assigned kept seeing "not
-    assigned to this test set" for five minutes after access was granted, with the
-    error telling them to ask for the assignment they already had.
+    operation, and its TTL bounds how long a REVOKED annotator keeps access. Caching
+    a *denial* for the same duration has no such justification: it leaves a
+    newly-assigned annotator locked out for the full TTL.
     """
 
     def test_an_empty_scope_is_cached_far_more_briefly_than_a_real_one(self):

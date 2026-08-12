@@ -62,9 +62,8 @@ export interface TestSetDocumentItem {
 }
 
 /**
- * Label provenance is the trust axis of the whole review loop, so machine-drafted
- * labels must never look like human-verified ones. One vocabulary, used here and
- * anywhere else labels surface.
+ * Shared label-provenance vocabulary. Machine-drafted labels must never render
+ * like human-verified ones, so every surface that shows labels uses this map.
  */
 export const LABEL_SOURCE_BADGES: Record<string, { color: 'blue' | 'green' | 'grey' | 'severity-neutral'; text: string }> = {
   'draft-machine': { color: 'blue', text: 'Draft (machine)' },
@@ -80,11 +79,10 @@ export const renderLabelSource = (labelSource?: string | null): React.JSX.Elemen
 };
 
 /**
- * Confidence as a percentage, colored against the *configured* alert threshold:
- * red below it, amber within 10 points above it, otherwise plain. Hardcoded bands
- * would contradict the assessment config — with a 0.8 threshold a 0.85 field is
- * passing, and with a 0.9 threshold it is failing. Falls back to 80% only when
- * the result carries no threshold at all.
+ * Confidence as a percentage, colored against the configured alert threshold: red
+ * below it, amber within 10 points above it, otherwise plain. Fixed bands would
+ * contradict the assessment config, where whether 0.85 passes depends on the
+ * threshold. The 80% default applies only when the result carries no threshold.
  */
 const DEFAULT_CONFIDENCE_THRESHOLD_PCT = 80;
 const NEAR_THRESHOLD_MARGIN_PCT = 10;
@@ -105,17 +103,12 @@ export const renderConfidence = (value?: number | null, threshold?: number | nul
 };
 
 /**
- * A test set's label quality, led by the estimated accuracy.
+ * A test set's label quality, led by the estimated accuracy. The number is the
+ * primary signal and the tier is shorthand for it: a bare "Gold" badge reads as a
+ * certification claim, so the percentage is always shown alongside.
  *
- * The number is the primary signal and the tier is shorthand for it, not the
- * other way around: "gold" carries a specific connotation for customers, so a
- * badge alone reads as a claim the accelerator has certified this data. Showing
- * "99.2% est." with the tier and its reason in the tooltip says the same thing
- * without overselling it.
- *
- * Colors are semantic and shared with the annotation workspace. Note the absence
- * of bare `grey`, which renders near-black in Cloudscape and made "Bronze" look
- * like the emphatic tier.
+ * No tier uses bare `grey`, which renders near-black in Cloudscape and makes the
+ * weakest tier look like the emphatic one.
  */
 export const QUALITY_TIER_COLORS: Record<string, 'green' | 'blue' | 'severity-neutral' | 'red'> = {
   gold: 'green',
@@ -153,14 +146,9 @@ export const renderQualityTier = (tier?: string | null, reason?: string | null, 
 };
 
 /**
- * How many fields need a human, as a count rather than a score.
- *
- * This is the same signal human review uses in the Document List: a field below
- * its configured threshold is an alert, and whether it missed by 2 points or 40
- * does not change that somebody has to look at it. A count also describes the
- * work in the way an annotator meets it — eight weak fields is eight things to
- * check — where a single lowest score does not. The score is still available in
- * the popover, since the calibration curve is built on it.
+ * How many fields need a human, as a count rather than a score — the same signal
+ * human review uses in the Document List, and a direct measure of the work. The
+ * lowest score stays in the popover because the calibration curve is built on it.
  */
 export const renderAlertCount = (
   alertCount?: number | null,
@@ -191,7 +179,7 @@ export const renderAlertCount = (
 };
 
 /**
- * Where this document stands in the review loop — as distinct from the model's
+ * Where this document stands in the review loop, as distinct from the model's
  * confidence, which review never changes.
  */
 export const renderReviewState = (labelSource?: string | null): React.JSX.Element => {
@@ -243,8 +231,6 @@ const TestSetDetail = (): React.JSX.Element => {
   const [showClearDraftsModal, setShowClearDraftsModal] = useState(false);
   const [isClearingDrafts, setIsClearingDrafts] = useState(false);
   const [clearedMessage, setClearedMessage] = useState<string | null>(null);
-  // Default to worst-first once any document carries confidence — the whole point
-  // of draft labels is to review the least trustworthy ones first.
   const [worstFirst, setWorstFirst] = useState(true);
 
   const fetchPage = useCallback(
@@ -269,10 +255,8 @@ const TestSetDetail = (): React.JSX.Element => {
           next[pageIndex] = page?.nextToken ?? null;
           return next;
         });
-        // Resume polling a job this session did not start. Harvesting happens on
-        // read, so a job only progresses while something polls it — a refresh
-        // mid-run otherwise left it RUNNING forever and the Test Sets list
-        // reported "Labeling" indefinitely.
+        // Resume polling a job this session did not start: harvesting happens on
+        // read, so an unpolled job stays RUNNING forever.
         if (page?.activeLabelJobId) {
           setLabelJob((current) =>
             current?.jobId === page.activeLabelJobId
@@ -310,8 +294,7 @@ const TestSetDetail = (): React.JSX.Element => {
         variables: { testSetId: testSetId ?? '' },
       });
       setShowClearDraftsModal(false);
-      // The job pointer is gone server-side, so drop the local banner too or it
-      // keeps describing a run whose output no longer exists.
+      // The job pointer is gone server-side, so drop the local banner with it.
       setLabelJob(null);
       setClearedMessage(response.data?.clearDraftLabels?.lastAddResult ?? 'Draft labels cleared.');
       fetchPage(1, [null]);
@@ -346,9 +329,7 @@ const TestSetDetail = (): React.JSX.Element => {
       }
     } catch (err) {
       logger.error('Error starting draft labeling:', err);
-      // Surface the server's message. Several are deliberate and actionable —
-      // "every document already has ground truth, run a test instead" tells the
-      // owner what to do, whereas "please try again" is advice that cannot work.
+      // Surface the server's message: several are deliberate and actionable.
       const message = (err as { errors?: { message?: string }[] })?.errors?.[0]?.message;
       setError(message || 'Failed to start draft labeling. Please try again.');
     } finally {
@@ -357,17 +338,12 @@ const TestSetDetail = (): React.JSX.Element => {
   };
 
   /**
-   * Poll the labeling job while it runs. The resolver harvests finished
-   * documents on read, so polling is what advances the job — and each tick also
-   * refreshes the table so labels appear as they land.
+   * Poll the labeling job while it runs; the resolver harvests finished documents
+   * on read, so polling is what advances the job.
    *
-   * Keyed on an explicit tick, and deliberately NOT on fetchPage/pageTokens. A
-   * tick calls fetchPage, which sets pageTokens; depending on those meant the
-   * effect tore itself down and re-armed mid-flight, so any tick that refreshed
-   * the table cancelled its own successor. Observed live: polling stopped ~30s
-   * into a run and the banner sat at "0 of 3" indefinitely while the documents
-   * had in fact all finished — the job only looked stuck because nothing was
-   * driving the harvest.
+   * Keyed on an explicit tick and never on fetchPage/pageTokens: a tick mutates
+   * pageTokens, so depending on it would tear the effect down mid-flight and each
+   * tick would cancel its own successor.
    */
   const [labelPollTick, setLabelPollTick] = useState(0);
   const [documentsStale, setDocumentsStale] = useState(false);
@@ -405,8 +381,8 @@ const TestSetDetail = (): React.JSX.Element => {
     return () => clearTimeout(timer);
   }, [testSetId, jobId, jobRunning, labelPollTick]);
 
-  // Refresh the table in a separate effect so the poll loop never depends on
-  // fetchPage — the dependency that was killing it.
+  // Table refresh lives in its own effect to keep fetchPage out of the poll
+  // loop's dependencies.
   useEffect(() => {
     if (!documentsStale) return;
     setDocumentsStale(false);
@@ -416,9 +392,8 @@ const TestSetDetail = (): React.JSX.Element => {
   const filteredDocs = filterText ? documents.filter((d) => d.objectKey.toLowerCase().includes(filterText.toLowerCase())) : documents;
 
   const hasConfidence = documents.some((d) => d.minConfidence !== null && d.minConfidence !== undefined);
-  // Sort in place on the current page: pagination is server-side and opaque, so
-  // this orders what the reviewer can actually see rather than implying a
-  // set-wide ranking it can't deliver.
+  // Sorts the current page only: pagination is server-side and opaque, so a
+  // set-wide ranking is not available here.
   const visibleDocs =
     worstFirst && hasConfidence
       ? [...filteredDocs].sort((a, b) => {
@@ -503,20 +478,15 @@ const TestSetDetail = (): React.JSX.Element => {
                       >
                         Generate draft labels
                       </Button>
-                      {/* Owners reach the worst-first queue from here rather than
-                          hand-building the URL; it is also the link they share
-                          with an assigned annotator. Routed through the effort
-                          estimate so the decision "how much to review" is made
-                          before committing a team, not discovered mid-queue. */}
+                      {/* Routed through the effort estimate rather than straight to
+                          the queue, so "how much to review" is decided before
+                          committing a team. */}
                       <Button onClick={() => setShowEffortModal(true)} iconName="user-profile">
                         Annotate
                       </Button>
-                      {/* Re-labeling with a corrected config is the normal loop
-                          while tuning one, and the harvest only REPLACES a draft
-                          when the new run produces a section for it — so a run that
-                          splits differently leaves orphans that keep dragging the
-                          document's confidence down. Without this the only way back
-                          to a clean set was deleting and recreating it. */}
+                      {/* Needed because the harvest only replaces a draft when the
+                          new run produces a section for it: a run that splits
+                          differently leaves orphan sections behind. */}
                       <Button onClick={() => setShowClearDraftsModal(true)} disabled={isLoading || labelJob?.status === 'RUNNING'}>
                         Clear draft labels
                       </Button>
@@ -547,22 +517,14 @@ const TestSetDetail = (): React.JSX.Element => {
                 },
                 {
                   id: 'labelSource',
-                  // David: "the use of the term label should be very precise.
-                  // Extraction labels, class labels, split labels, those are all
-                  // different things." This column is provenance for the extracted
-                  // field values, not for the class.
+                  // Provenance of the extracted field values only — not of class or
+                  // split labels, which are separate things.
                   header: 'Extraction labels',
                   cell: (item: TestSetDocumentItem) => renderLabelSource(item.labelSource),
                   sortingField: 'labelSource',
                 },
                 {
                   id: 'alertCount',
-                  // What the rest of the product shows for human review: the number
-                  // of fields below their threshold, not a score. A bare percentage
-                  // invited reading 28% as "this document is 28% good" when the
-                  // other 30 fields were above 0.99 — and it said nothing about how
-                  // much work the document actually is. The score lives in the
-                  // cell's popover.
                   header: 'Confidence alerts',
                   cell: (item: TestSetDocumentItem) =>
                     renderAlertCount(item.alertCount, item.fieldCount, item.minConfidence, item.confidenceThreshold),
@@ -570,10 +532,9 @@ const TestSetDetail = (): React.JSX.Element => {
                 },
                 {
                   id: 'reviewState',
-                  // The column that MOVES as annotation progresses. Confidence
-                  // alerts come from the model's own assessment and deliberately do
-                  // not change when a human reviews — so without this there was
-                  // nothing on screen reflecting review effort.
+                  // The only column that moves as annotation progresses; confidence
+                  // alerts are the model's own assessment and review never changes
+                  // them.
                   header: 'Review state',
                   cell: (item: TestSetDocumentItem) => renderReviewState(item.labelSource),
                   sortingField: 'labelSource',
@@ -596,14 +557,13 @@ const TestSetDetail = (): React.JSX.Element => {
                 {
                   id: 'rowActions',
                   header: '',
-                  // David: "you can also have an annotate button per document, by
-                  // the way, I would like to scroll down." Reaching one specific
-                  // document previously meant opening the queue and finding it,
-                  // even when you were already looking at it here.
+                  // Explicit width: as the last column with an empty header this
+                  // collapses and the label wraps one character per line.
+                  width: 120,
                   cell: (item: TestSetDocumentItem) => (
-                    <Button variant="inline-link" href={testSetAnnotateHref(testSetId ?? '', item.objectKey)}>
-                      Annotate
-                    </Button>
+                    <Box variant="span" fontSize="body-s">
+                      <Link href={testSetAnnotateHref(testSetId ?? '', item.objectKey)}>Annotate</Link>
+                    </Box>
                   ),
                 },
               ]}
@@ -677,8 +637,8 @@ const TestSetDetail = (): React.JSX.Element => {
                   Deletes every machine-generated draft label in this test set, leaving the documents in place so you can re-label them with
                   a different configuration.
                 </Box>
-                {/* Say plainly what is NOT deleted: the fear here is losing the
-                    team's annotation work to a config retry. */}
+                {/* Only draft-machine labels are removed; reviewed, uploaded and
+                    generated ground truth survives a re-label. */}
                 <Alert type="info">
                   Reviewed labels, and any ground truth you uploaded or generated, are kept. Only labels tagged <b>Draft (machine)</b> are
                   removed.

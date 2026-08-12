@@ -127,9 +127,9 @@ const UserManagementLayout = (): React.JSX.Element => {
   };
 
   /**
-   * Test sets available to assign as an Annotator's scope. Loaded on demand
-   * (when the create/edit modal opens) rather than on mount, since only the
-   * Annotator persona needs it.
+   * Test sets available to assign as an Annotator's scope. Loaded when the
+   * create/edit modal opens rather than on mount, since only the Annotator persona
+   * needs it.
    */
   const loadTestSets = useCallback(async () => {
     if (!awsConfig) return;
@@ -191,8 +191,7 @@ const UserManagementLayout = (): React.JSX.Element => {
     }
 
     // An Annotator with no assigned test set is denied every set by the server's
-    // scope check, so creating one would produce an account that cannot do
-    // anything. Fail here with a clear reason rather than after the invite email.
+    // scope check, so the account could do nothing. Fail before the invite email.
     if (persona === 'Annotator' && selectedTestSets.length === 0) {
       setError('Assign at least one test set — an annotator with no assigned set cannot access anything');
       return;
@@ -265,9 +264,9 @@ const UserManagementLayout = (): React.JSX.Element => {
     try {
       const client = generateClient();
       const allowedConfigVersions = editScopeVersions.length > 0 ? editScopeVersions.map((opt) => opt.value) : null;
-      // Only send the test-set axis for Annotators. The resolver treats an
+      // Only send the test-set axis for Annotators: the resolver treats an
       // argument's *presence* as "change this axis", so sending null for a
-      // non-annotator would needlessly clear a scope we never showed.
+      // non-annotator would clear a scope that was never shown.
       const variables: Record<string, unknown> = { userId: editingUser.userId, allowedConfigVersions };
       if (editingUser.persona === 'Annotator') {
         variables.allowedTestSets = editScopeTestSets.length > 0 ? editScopeTestSets.map((opt) => opt.value) : null;
@@ -596,10 +595,8 @@ const UserManagementLayout = (): React.JSX.Element => {
                   tokenLimit={3}
                 />
               </FormField>
-              {/* Annotators are scoped to the test set(s) they were onboarded for.
-                  Required rather than optional: an annotator with no assigned set
-                  is denied every set by the server, so creating one without a
-                  scope produces an account that cannot do anything. */}
+              {/* Required rather than optional: an annotator with no assigned set is
+                  denied every set by the server, so the account could do nothing. */}
               {persona === 'Annotator' && (
                 <FormField
                   label="Assigned test sets"

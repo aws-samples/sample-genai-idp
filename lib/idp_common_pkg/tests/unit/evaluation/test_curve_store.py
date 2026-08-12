@@ -107,8 +107,7 @@ class TestConcurrentMerging:
     def test_interleaved_writers_all_contribute(self, table):
         """Two reviewers finishing at once must not overwrite each other.
 
-        This is why the store uses per-bin ADD instead of read-modify-write —
-        the same class of bug that lost a published test-set version earlier.
+        This is why the store uses per-bin ADD instead of read-modify-write.
         """
         store_a = CurveStore(table)
         store_b = CurveStore(table)

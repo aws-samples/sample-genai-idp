@@ -40,9 +40,9 @@ MAX_PAGE_SIZE = 200
 # GSI name
 TYPE_DATE_INDEX = "TypeDateIndex"
 
-# TypeDateIndex hash-key values. Documents submitted by a non-production caller
-# (Test Studio, Auto Optimizer) carry their own ItemType, so they never appear in
-# the production Document List. Must match idp_common.dynamodb.service.
+# TypeDateIndex hash-key values; must match idp_common.dynamodb.service. Documents
+# submitted by Test Studio or Auto Optimizer carry their own ItemType, so they never
+# appear in the production Document List.
 ITEM_TYPE_DOCUMENT = "document"
 ITEM_TYPE_TEST_DOCUMENT = "test-document"
 
@@ -149,17 +149,13 @@ def _item_type_for_view(mode):
     """Which TypeDateIndex hash key to query for the requested view.
 
     "production" (the default) lists ordinary uploads; "test" lists documents
-    submitted by Test Studio or Auto Optimizer.
+    submitted by Test Studio or Auto Optimizer. The views are mutually exclusive
+    by design; there is no combined view.
 
-    Selecting on the index KEY rather than filtering a projected attribute keeps
-    pagination exact. DynamoDB applies FilterExpression *after* Limit, so on a
-    stack where most documents are test artifacts a page of 50 could return 1 row
-    with a nextToken and no indication the rest were dropped.
-
-    There is deliberately no combined view: it would mean merging two independently
-    paginated queries by timestamp and synthesising a composite nextToken, which is
-    a lot of machinery for a debugging convenience. Two exact views cover the
-    stated need — hide test runs, or inspect them.
+    Selecting on the index key rather than filtering a projected attribute keeps
+    pagination exact: DynamoDB applies FilterExpression after Limit, so a filtered
+    page of 50 can return a single row plus a nextToken, with no indication that
+    the rest were dropped.
     """
     return ITEM_TYPE_TEST_DOCUMENT if (mode or "").lower() == "test" else ITEM_TYPE_DOCUMENT
 

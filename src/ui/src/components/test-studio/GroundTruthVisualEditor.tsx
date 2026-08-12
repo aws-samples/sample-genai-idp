@@ -50,9 +50,8 @@ const client = generateClient();
 const logger = new ConsoleLogger('GroundTruthVisualEditor');
 
 const REEXTRACT_POLL_MS = 3000;
-// Generous: a re-extract is a full pipeline pass (OCR is skipped, extraction and
-// assessment are not), and giving up early would report failure on a run that is
-// about to succeed.
+// A re-extract is a full extraction + assessment pass, so the budget is generous;
+// timing out early would report failure on a run that is about to succeed.
 const REEXTRACT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface TestSetDocumentSectionRef {
@@ -71,25 +70,19 @@ interface GroundTruthVisualEditorProps {
   /**
    * Optional replacement for how a save is persisted.
    *
-   * By default the editor writes the baseline object straight to S3 via a
-   * presigned POST. That is right for an owner editing ground truth directly, but
-   * it bypasses the HITL review API — so it never claims a lock, never tags the
-   * label `reviewed-human`, and never feeds the confidence curve that the
-   * review-effort estimator learns from.
-   *
-   * The annotation workspace supplies this to route saves through
-   * `completeSectionReview` instead, which engages all of the above. When absent
-   * the direct-S3 path is unchanged, so existing callers keep their behaviour.
+   * The default writes the baseline object straight to S3 via a presigned POST,
+   * which bypasses the HITL review API: no lock claim, no `reviewed-human` tag, no
+   * confidence-curve observation. Callers that need those supply this to route
+   * saves through `completeSectionReview` instead.
    */
   onSave?: (sectionId: string, data: Record<string, unknown>) => Promise<void>;
-  /** Label for the save button (the queue uses "Save & next in queue"). */
+  /** Label for the save button. */
   saveButtonText?: string;
   /** Called after a re-extract completes, so the caller can refresh its queue. */
   onReextracted?: () => void;
   /**
-   * Owning test set. Required to offer re-extraction after a class correction —
-   * reextractTestSetDocument starts a one-document labeling run keyed on the set.
-   * The editor is otherwise usable without it.
+   * Owning test set. Required only to offer re-extraction after a class
+   * correction, since reextractTestSetDocument is keyed on the set.
    */
   testSetId?: string;
 }
@@ -122,19 +115,14 @@ const GroundTruthVisualEditor = ({
   const [error, setError] = useState<string | null>(null);
   const [activeFieldGeometry, setActiveFieldGeometry] = useState<Record<string, unknown> | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
-  // Same filter the HITL review editor offers. On a document with 169 fields the
-  // handful below threshold are what a reviewer is actually there for, and
-  // scrolling to find them is most of the work.
   const [filterMode, setFilterMode] = useState<SelectProps.Option>({ label: 'Show all fields', value: 'none' });
   const [activeTabId, setActiveTabId] = useState('visual');
   const [isReextracting, setIsReextracting] = useState(false);
   const [reextractNote, setReextractNote] = useState<string | null>(null);
-  // The class the loaded baseline was extracted under. Comparing against the
-  // current selection is what tells us the fields no longer match the class, and
-  // therefore whether re-extraction is owed.
+  // The class the loaded baseline was extracted under; differing from the current
+  // selection is what says the fields no longer match the class.
   const [savedClassType, setSavedClassType] = useState<string | undefined>(undefined);
-  // Bumped to force a baseline re-read after a re-extract rewrites it under the
-  // corrected class; the key alone would not change.
+  // Forces a baseline re-read after a re-extract rewrites it: the key is unchanged.
   const [reloadToken, setReloadToken] = useState(0);
 
   const selectedSection = sections.find((s) => s.sectionId === selectedSectionId) ?? sections[0];
@@ -226,15 +214,15 @@ const GroundTruthVisualEditor = ({
 
   const documentClassType = (localData?.document_class as Record<string, unknown> | undefined)?.type as string | undefined;
 
-  // The classes this document's own config version defines — not the deployment's
-  // current active config, which may have moved on since the labels were written.
-  // _write_draft_labels_for_doc stamps metadata.config_version for exactly this.
+  // Classes come from the config version stamped on the baseline, not the
+  // deployment's active config, which may have moved on since the labels were
+  // written.
   const baselineConfigVersion =
     ((localData?.metadata as Record<string, unknown> | undefined)?.config_version as string | undefined) || 'default';
   const { mergedConfig } = useConfiguration(baselineConfigVersion);
   const classOptions = useMemo(() => getConfigClassOptions(mergedConfig), [mergedConfig]);
-  // A class the config no longer lists must still be selectable, or correcting a
-  // document whose class was since renamed would silently blank the field.
+  // A class the config no longer lists stays selectable; otherwise a document whose
+  // class was since renamed would silently blank the field.
   const classOptionsWithCurrent = useMemo(() => {
     if (!documentClassType || classOptions.some((o) => o.value === documentClassType)) return classOptions;
     return [{ label: documentClassType, value: documentClassType, description: 'Not defined in this config version' }, ...classOptions];
@@ -264,11 +252,10 @@ const GroundTruthVisualEditor = ({
   /**
    * Re-run extraction under the corrected class, then reload the new labels.
    *
-   * Blocks until the labels are actually replaced rather than returning on the
-   * job being queued: the point of the button is that the fields on screen are
-   * wrong, so handing back control while they are still wrong just moves the
-   * confusion. Labels are harvested on read, so polling getDraftLabelJob is also
-   * what drives the write-back — this loop is not merely observing.
+   * Blocks until the labels are replaced rather than returning once the job is
+   * queued, because the fields on screen are wrong until then. Labels are
+   * harvested on read, so this poll loop is what drives the write-back; it is not
+   * merely observing.
    */
   const handleReextract = async () => {
     if (!documentClassType || !testSetId) return;
@@ -299,8 +286,7 @@ const GroundTruthVisualEditor = ({
         }
       }
       if (status === 'RUNNING') {
-        // Not an error: the job is still going and the harvest is idempotent, so
-        // say where it stands instead of implying it failed.
+        // Not an error: the job is still running and the harvest is idempotent.
         setReextractNote(
           'Re-extraction is taking longer than expected. It is still running — reopen this document shortly to see the new fields.',
         );
@@ -326,14 +312,9 @@ const GroundTruthVisualEditor = ({
       const dataToSave: Record<string, unknown> = { ...localData };
       const fullPath = selectedSection.baselineKey;
 
-      // Caller-supplied persistence (the annotation workspace routes through the
-      // review API so the save claims, tags and teaches the confidence curve).
-      //
-      // No client-side _editHistory entry on this path: completeSectionReview
-      // writes one server-side, with the reviewer identity from the Cognito token
-      // and a field-level diff against the label being replaced. Appending here
-      // too would double-record every review, and with the weaker of the two
-      // entries — client-asserted identity and no diff.
+      // No client-side _editHistory entry on this path: the review API writes one
+      // server-side with token-derived identity and a field-level diff, so appending
+      // here would double-record every review with the weaker entry.
       if (onSave) {
         await onSave(selectedSection.sectionId, dataToSave);
         setLocalData(dataToSave);
@@ -343,8 +324,8 @@ const GroundTruthVisualEditor = ({
         return;
       }
 
-      // Direct-to-S3 path: nothing server-side records provenance here, so the
-      // editor writes its own entry (same convention as VisualEditorModal).
+      // Direct-to-S3 path: nothing server-side records provenance, so the editor
+      // writes its own entry (same convention as VisualEditorModal).
       const editHistory = (dataToSave._editHistory as unknown[]) || [];
       editHistory.push({
         timestamp: new Date().toISOString(),
@@ -439,9 +420,8 @@ const GroundTruthVisualEditor = ({
         Ground truth — {objectKey}
       </Header>
 
-      {/* Everything we tag a label with, visible where the label is edited —
-          Bob's ask. Provenance is the trust axis of the whole review loop, so a
-          machine draft must never be mistaken on screen for confirmed work. */}
+      {/* Provenance is shown where the label is edited, so a machine draft cannot
+          be mistaken on screen for confirmed work. */}
       {localData && (
         <SpaceBetween direction="horizontal" size="xs">
           {renderLabelSource(localData.labelSource as string | undefined)}
@@ -514,11 +494,10 @@ const GroundTruthVisualEditor = ({
                           }
                         >
                           <SpaceBetween size="xs">
-                            {/* A dropdown of the config's classes, not free text: a
-                                class the config has no schema for cannot be
-                                extracted against, so offering it invites a
-                                correction that can never take effect. Falls back to
-                                free text when no config resolves. */}
+                            {/* Constrained to the config's classes: a class with no
+                                schema cannot be extracted against, so the correction
+                                could never take effect. Free text only when no
+                                config resolves. */}
                             {classOptions.length > 0 ? (
                               <Select
                                 selectedOption={
@@ -542,8 +521,8 @@ const GroundTruthVisualEditor = ({
                               />
                             )}
                             {/* Correcting the class is only half the fix: the fields
-                                below it were extracted against the wrong schema, so
-                                offer the re-extract that replaces them. */}
+                                were extracted against the previous schema and only a
+                                re-extract replaces them. */}
                             {classChanged && testSetId && (
                               <Alert
                                 type="info"
@@ -628,10 +607,6 @@ const GroundTruthVisualEditor = ({
                 },
                 {
                   id: 'history',
-                  // Same tab, same component, same place as the document-detail
-                  // editor. Asked for by Bob; Spencer's use is spotting a field the
-                  // team keeps correcting, which points at a configuration gap
-                  // rather than at the annotators.
                   label: 'Revision History',
                   content: <EditHistoryTab predictionData={localData} baselineData={null} />,
                 },

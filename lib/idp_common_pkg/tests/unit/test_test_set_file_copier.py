@@ -209,10 +209,9 @@ def test_failed_baseline_copies_still_fail_the_run(copier_env, monkeypatch):
 def test_copy_files_to_bucket_handles_an_empty_file_list(copier_env):
     """An unlabeled set has no baseline files, so the copy list is empty.
 
-    Regression: ThreadPoolExecutor(max_workers=0) raises "max_workers must be
-    greater than 0", which failed the entire labeling run. Found only on a live
-    stack — the handler-level tests mock _copy_files_to_bucket, so they skip the
-    thread pool entirely. This calls the real function.
+    Regression: ThreadPoolExecutor(max_workers=0) raises "max_workers must be greater
+    than 0", failing the whole labeling run. Calls the real function, since the
+    handler-level tests mock _copy_files_to_bucket and skip the thread pool.
     """
     copier = copier_env
     assert (

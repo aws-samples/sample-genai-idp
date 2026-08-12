@@ -219,15 +219,8 @@ interface PageImageViewerProps {
   showControls?: boolean;
   boundingBoxes?: BoundingBoxOverlay[];
   /**
-   * Zoom to and center the focused field, not just highlight it.
-   *
-   * `zoomToField` implemented this all along but was only exposed by assigning it
-   * onto a DOM ref, which nothing read — so the behaviour was unreachable. The
-   * document-detail editor had its own copy of the same calculation; this prop is
-   * what lets that editor use this component without losing it.
-   *
-   * Off by default: the ground-truth editor highlights without zooming, and
-   * changing that would alter behaviour its users already rely on.
+   * Zoom to and center the focused field, not just highlight it. Off by default,
+   * since the ground-truth editor highlights without zooming.
    */
   zoomToFieldOnFocus?: boolean;
 }
@@ -454,8 +447,8 @@ const PageImageViewer = ({
     }
   }, [zoomToField]);
 
-  // Zoom to the focused field when the caller asked for it. Keyed on the geometry
-  // so re-focusing the same field does not re-trigger the animation.
+  // Keyed on the geometry so re-focusing the same field does not re-trigger the
+  // animation.
   useEffect(() => {
     if (zoomToFieldOnFocus && activeFieldGeometry) {
       zoomToField(activeFieldGeometry);

@@ -2,17 +2,11 @@
 // SPDX-License-Identifier: MIT-0
 
 /**
- * CreateTestSetWizard — one guided path for creating a test set.
+ * CreateTestSetWizard — the single guided path for creating a test set.
  *
- * Replaces four separate modals reached from two similarly-named dropdowns
- * ("Add Test Set" → Existing Files / New Upload, and "Add Documents" → From
- * Existing Files / From Upload). Those options were named for their *mechanism*
- * rather than their *outcome*, so choosing between them required knowing the
- * implementation. The wizard names what you end up with instead, and the source
- * choice is a single explicit step.
- *
- * Uploads use Cloudscape FileUpload (drag-and-drop, size/type display, built-in
- * error slots) rather than the raw <input type="file"> the old modals used.
+ * Steps are named for the outcome (what you end up with) rather than the
+ * mechanism, and the source is one explicit choice. Every create/add entry point
+ * routes through here so the flows cannot drift apart.
  */
 
 import React, { useState } from 'react';
@@ -114,12 +108,10 @@ const CreateTestSetWizard = ({
   const isUpload = source === 'upload-labeled' || source === 'upload-documents';
   const isGenerate = source === 'generate';
 
-  // Synthetic generation shares its form (and its submit) with the standalone
-  // deep-link modal, so the two entry points cannot drift. Only active on its own
-  // branch so it doesn't fetch estimates or test sets for the other sources.
+  // Shared with the standalone deep-link modal so the two entry points cannot
+  // drift. Gated on the branch: inactive it fetches no estimates or test sets.
   const generateForm = useGenerateSyntheticForm({ active: visible && isGenerate });
 
-  /** One place to clear everything — the old modals repeated this per handler. */
   const reset = () => {
     setActiveStep(0);
     setSource('upload-labeled');
@@ -299,20 +291,10 @@ const CreateTestSetWizard = ({
   const sourceMeta = CREATE_SOURCES.find((s) => s.value === source);
 
   /**
-   * The configuration prerequisite, stated on step 2 rather than step 1.
-   *
-   * David's original point was that someone arriving with documents and nothing
-   * else got all the way to the generate-labels step before being told they
-   * needed a configuration; his fix was explicitly to signpost the existing path
-   * rather than add one ("I'm not proposing any new paths. I'm proposing telling
-   * the user, use this path to accomplish this task").
-   *
-   * It lived on step 1, where it competed with the source choice for attention and
-   * said the same generic thing to everyone. David then suggested moving it to
-   * Configure, which is better for a reason worth stating: by then the source is
-   * known, so the note can say what THAT source actually needs. Uploading verified
-   * labels does not require a configuration to produce them; uploading bare
-   * documents does. A generic banner had to hedge across both.
+   * The configuration prerequisite, stated on Configure rather than the source
+   * step: by then the source is known, so the note names what that source needs.
+   * Uploading verified labels needs no configuration; uploading bare documents
+   * does, because draft labeling has to be told what to extract.
    */
   const configPrerequisite =
     source === 'upload-labeled' ? null : (
@@ -357,8 +339,8 @@ const CreateTestSetWizard = ({
     </SpaceBetween>
   );
 
-  // Generation collects its own name (as a destination, which may also be an
-  // existing set), so it skips the shared name/description/class fields entirely.
+  // Generation collects its own destination name, which may be an existing set, so
+  // it skips the shared name/description/class fields.
   const configureStep = isGenerate ? (
     <SpaceBetween size="l">
       {configPrerequisite}
@@ -499,9 +481,6 @@ const CreateTestSetWizard = ({
               ]),
         ]}
       />
-      {/* What happens after creating, not what is required — the configuration
-          prerequisite is stated on the Configure step, and repeating it here would
-          be the third time. */}
       {source === 'upload-documents' && (
         <Alert type="info" header="Next step after this">
           This set arrives without ground truth. Open it and choose <strong>Generate draft labels</strong>, then review the documents with
@@ -516,8 +495,8 @@ const CreateTestSetWizard = ({
       <Wizard
         activeStepIndex={activeStep}
         onNavigate={({ detail }) => {
-          // Block forward navigation on incomplete input rather than failing at
-          // submit, which is where the old modals surfaced these.
+          // Validate on forward navigation so incomplete input is caught per step
+          // rather than at submit.
           if (detail.requestedStepIndex > activeStep) {
             if (activeStep === 1 && isGenerate) {
               if (!generateForm.canSubmit) {
