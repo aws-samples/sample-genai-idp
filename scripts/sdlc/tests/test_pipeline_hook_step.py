@@ -418,3 +418,51 @@ class TestFailureDiagnostics:
 
         src = inspect.getsource(cbd._dump_hook_logs)
         assert "never invoked" in src
+
+
+@pytest.mark.unit
+class TestHookZipDependencyClosure:
+    """PyYAML was missing from the zip, and no offline test caught it.
+
+    The failure only appears at Lambda cold start:
+    `load_hook_document -> Document.decompress -> idp_common.utils ->
+    idp_common.config.models -> configuration_manager` imports yaml, so the hook
+    died with `ModuleNotFoundError: No module named 'yaml'` — found by deploying
+    the zip to a real Lambda and invoking it against a real compressed document.
+    """
+
+    def test_yaml_is_vendored(self, cbd, tmp_path):
+        pytest.importorskip("idp_common")
+        pytest.importorskip("yaml")
+        path = cbd._build_hook_zip(str(tmp_path / "hook.zip"))
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+        assert any(n.startswith("yaml/") for n in names), (
+            "PyYAML is on the load_hook_document import path"
+        )
+
+    def test_self_check_covers_every_required_package(self, cbd, tmp_path, monkeypatch):
+        """The original self-check only looked for pydantic, which is how the yaml
+        omission shipped. Dropping ANY required package must now raise."""
+        pytest.importorskip("idp_common")
+        import importlib
+
+        real = importlib.import_module
+
+        def fake(name, *a, **k):
+            if name == "yaml":
+                raise ImportError("simulated missing yaml")
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(importlib, "import_module", fake)
+        with pytest.raises(RuntimeError, match="yaml"):
+            cbd._build_hook_zip(str(tmp_path / "hook.zip"))
+
+    def test_runtime_libs_are_not_vendored(self, cbd, tmp_path):
+        """boto3/botocore come from the Lambda runtime; vendoring them would push
+        the zip past the 50MB direct-upload limit."""
+        pytest.importorskip("idp_common")
+        path = cbd._build_hook_zip(str(tmp_path / "hook.zip"))
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+        assert not any(n.startswith("botocore/") for n in names)

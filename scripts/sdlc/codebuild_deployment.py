@@ -1607,8 +1607,24 @@ def _build_hook_zip(path):
     # idp_common[core] needs these at import time (config.models imports
     # pydantic). Deliberately explicit: a broad site-packages sweep would push
     # the zip past Lambda's 50MB direct-upload limit.
-    required = ["idp_common", "pydantic", "pydantic_core", "annotated_types"]
-    optional = ["typing_extensions", "typing_inspection"]
+    # The closure is what `idp_common.hooks` actually pulls in at import time:
+    # load_hook_document -> Document.decompress -> idp_common.utils ->
+    # idp_common.config.models -> configuration_manager, which imports BOTH
+    # pydantic and yaml. Omitting yaml produced a ModuleNotFoundError at cold
+    # start that no offline test caught, so this list is validated by actually
+    # invoking the deployed function (see the zip self-check below and the
+    # dry-run procedure in CI_TEST_COVERAGE.md).
+    required = [
+        "idp_common",
+        "pydantic",
+        "pydantic_core",
+        "annotated_types",
+        "yaml",  # PyYAML — imported by idp_common.config.configuration_manager
+    ]
+    # `_yaml` is PyYAML's optional C extension; boto3/botocore are provided by
+    # the Lambda runtime, so they are deliberately NOT vendored (they would push
+    # the zip past the 50MB direct-upload limit).
+    optional = ["typing_extensions", "typing_inspection", "_yaml"]
 
     def _add_module(zf, mod_name, required_flag):
         try:
@@ -1651,11 +1667,15 @@ def _build_hook_zip(path):
     # imports fine locally and dies with ModuleNotFoundError only in CI.
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
-        for expected in ("index.py", "idp_common/hooks/__init__.py", "pydantic/"):
-            if not any(n == expected or n.startswith(expected) for n in names):
+        expected = ["index.py", "idp_common/hooks/__init__.py"]
+        # Every REQUIRED third-party package must be present, not just a
+        # hand-picked one: the yaml omission slipped through a pydantic-only check.
+        expected += [f"{pkg}/" for pkg in required if pkg != "idp_common"]
+        for want in expected:
+            if not any(n == want or n.startswith(want) for n in names):
                 raise RuntimeError(
-                    f"Hook zip is missing {expected!r} — the Lambda would fail "
-                    f"at import time ({len(names)} entries built)"
+                    f"Hook zip is missing {want!r} — the Lambda would fail at "
+                    f"import time ({len(names)} entries built)"
                 )
     return path
 
