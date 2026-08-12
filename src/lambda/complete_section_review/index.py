@@ -172,6 +172,14 @@ def complete_section_review(
         write_correction_to_test_set_baseline(
             object_key, section_id, edited_data, username, user_email
         )
+    else:
+        # Confirming labels unchanged is still a review: it is a human asserting
+        # the extraction is correct, which is exactly what a golden dataset
+        # records. Without this the baseline kept its draft-machine tag, so the
+        # test set showed "Awaiting review" after every document had been
+        # confirmed, a later labeling run could overwrite the confirmation, and
+        # the confidence curve never learned that those fields were right.
+        confirm_test_set_baseline_reviewed(object_key, section_id, username, user_email)
 
     # Get current pending and completed sections from document model
     pending = set(document.hitl_sections_pending or [])
@@ -348,6 +356,53 @@ def write_correction_to_test_set_baseline(
         logger.error(
             f"Failed to write correction to test-set baseline for {object_key}: {e}"
         )
+
+
+def confirm_test_set_baseline_reviewed(
+    object_key, section_id, username="", user_email=""
+):
+    """Tag a baseline human-reviewed when the reviewer changed nothing.
+
+    "The labels are correct" is a verdict, not the absence of one: every field
+    keeps its predicted value, and a human has asserted those values are right.
+    The baseline is rewritten in place so it carries ``reviewed-human``, gains a
+    revision entry, and feeds the curve observations that all say "the model was
+    correct" — the high-confidence evidence review otherwise never produces.
+
+    Best-effort, and a no-op outside a test set or when no baseline exists yet.
+    """
+    if not TEST_SET_BUCKET:
+        return
+    try:
+        table = dynamodb.Table(TRACKING_TABLE_NAME)
+        doc = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"}).get(
+            "Item", {}
+        )
+        test_set_id = doc.get("TestSetId")
+        if not test_set_id:
+            return
+
+        filename = object_key.split("/", 1)[1] if "/" in object_key else object_key
+        baseline_key = (
+            f"{test_set_id}/baseline/{filename}/sections/{section_id}/result.json"
+        )
+        existing = _read_json(TEST_SET_BUCKET, baseline_key)
+        if not isinstance(existing, dict):
+            logger.info(
+                f"No baseline to confirm at s3://{TEST_SET_BUCKET}/{baseline_key}"
+            )
+            return
+        if existing.get("labelSource") == "reviewed-human":
+            return  # Already confirmed; nothing to record.
+
+        # Reuse the correction path with the values unchanged: confirming asserts
+        # the current values ARE the ground truth, so the same provenance stamp,
+        # revision entry and curve observations apply.
+        write_correction_to_test_set_baseline(
+            object_key, section_id, existing, username, user_email
+        )
+    except Exception as e:  # noqa: BLE001 — must not break the review
+        logger.error(f"Failed to confirm test-set baseline for {object_key}: {e}")
 
 
 # Caps the trail on a repeatedly reviewed label; the newest entries are kept.

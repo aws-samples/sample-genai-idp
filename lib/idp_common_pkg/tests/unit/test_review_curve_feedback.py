@@ -16,7 +16,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -235,6 +235,121 @@ class TestCurveFeedback:
         from idp_common.evaluation.curve_store import CurveStore
 
         assert CurveStore(table).get_curve("ts1").total_observations == 0
+
+
+class TestConfirmWithoutEdits:
+    """Confirming labels unchanged is a review verdict, not the absence of one."""
+
+    def test_confirm_marks_the_baseline_reviewed(self, review_env):
+        """Regression: the test set showed "Awaiting review" after every document
+        had been confirmed.
+
+        write_correction_to_test_set_baseline only ran when editedData was
+        supplied, so "labels are correct — mark reviewed" updated the pipeline
+        document but left the baseline tagged draft-machine — which is what the
+        test set's Review state column reads.
+        """
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        module.confirm_test_set_baseline_reviewed(
+            "run1/a.pdf", "1", "confirmer", "confirmer@example.com"
+        )
+
+        stored = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert stored["labelSource"] == "reviewed-human"
+        # Values are untouched — confirming asserts they were already right.
+        assert stored["inference_result"] == DRAFTED_LABEL["inference_result"]
+        assert stored["_editHistory"][-1]["editedBy"] == "confirmer"
+
+    def test_confirm_teaches_the_curve_the_model_was_right(self, review_env):
+        """The high-confidence evidence that editing never produces.
+
+        A reviewer who changes nothing has confirmed every field, including the
+        low-confidence ones — exactly the observations the calibration curve needs
+        to learn that a low score was nonetheless correct.
+        """
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        module.confirm_test_set_baseline_reviewed("run1/a.pdf", "1", "confirmer")
+
+        from idp_common.evaluation.curve_store import CurveStore
+
+        curve = CurveStore(table).get_curve("ts1", "v2")
+        assert curve.review_observations == 2
+        assert sum(curve.correct) == 2, "confirming means every field was correct"
+
+    def test_confirming_twice_records_once(self, review_env):
+        """Re-confirming must not inflate the curve with duplicate observations."""
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        module.confirm_test_set_baseline_reviewed("run1/a.pdf", "1", "first")
+        module.confirm_test_set_baseline_reviewed("run1/a.pdf", "1", "second")
+
+        from idp_common.evaluation.curve_store import CurveStore
+
+        curve = CurveStore(table).get_curve("ts1", "v2")
+        assert curve.review_observations == 2, "second confirm must be a no-op"
+        stored = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert len(stored["_editHistory"]) == 1
+
+    def test_confirm_outside_a_test_set_is_a_no_op(self, review_env):
+        """Ordinary HITL review has no baseline to confirm."""
+        module, table, s3 = review_env
+        table.put_item(Item={"PK": "doc#plain/a.pdf", "SK": "none"})
+        module.confirm_test_set_baseline_reviewed("plain/a.pdf", "1", "someone")
+        scanned = table.scan(
+            FilterExpression="begins_with(SK, :sk)",
+            ExpressionAttributeValues={":sk": "curve#"},
+        )
+        assert scanned.get("Items") == []
+
+
+class TestHandlerConfirmPath:
+    """The end-to-end path the "labels are correct" button actually takes."""
+
+    def test_complete_section_review_without_edited_data_tags_the_baseline(
+        self, review_env
+    ):
+        """The UI sends completeSectionReview with NO editedData when confirming.
+
+        Pins the wiring, not just the helper: the else-branch must be reached from
+        complete_section_review itself, or the button silently leaves the baseline
+        a draft again.
+        """
+        module, table, s3 = review_env
+        _seed_review_doc(table, s3)
+
+        with patch.object(module, "create_document_service") as mock_service:
+            doc = MagicMock()
+            doc.sections = [MagicMock(section_id="1", extraction_result_uri=None)]
+            doc.hitl_sections_pending = ["1"]
+            doc.hitl_sections_completed = []
+            mock_service.return_value.get_document.return_value = doc
+
+            module.complete_section_review(
+                "run1/a.pdf", "1", None, "confirmer", "confirmer@example.com"
+            )
+
+        stored = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert stored["labelSource"] == "reviewed-human"
 
 
 class TestRevisionHistory:
