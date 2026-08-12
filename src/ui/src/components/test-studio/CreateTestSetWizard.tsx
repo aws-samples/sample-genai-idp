@@ -298,23 +298,32 @@ const CreateTestSetWizard = ({
 
   const sourceMeta = CREATE_SOURCES.find((s) => s.value === source);
 
-  const sourceStep = (
-    <SpaceBetween size="l">
-      {/* David: "let's say I'm a customer, I have documents, I have no labels, I
-          have no schema, I have no nothing except documents" — the wizard used to
-          take that person all the way to the generate-labels step before telling
-          them they needed a configuration. He was explicit that the fix is NOT a
-          new path ("I'm not proposing any new paths. I'm proposing telling the
-          user, use this path to accomplish this task"), so this states the two
-          prerequisites and links to the paths that already exist. */}
-      <Alert type="info" header="What a test set needs">
-        <SpaceBetween size="xs">
+  /**
+   * The configuration prerequisite, stated on step 2 rather than step 1.
+   *
+   * David's original point was that someone arriving with documents and nothing
+   * else got all the way to the generate-labels step before being told they
+   * needed a configuration; his fix was explicitly to signpost the existing path
+   * rather than add one ("I'm not proposing any new paths. I'm proposing telling
+   * the user, use this path to accomplish this task").
+   *
+   * It lived on step 1, where it competed with the source choice for attention and
+   * said the same generic thing to everyone. David then suggested moving it to
+   * Configure, which is better for a reason worth stating: by then the source is
+   * known, so the note can say what THAT source actually needs. Uploading verified
+   * labels does not require a configuration to produce them; uploading bare
+   * documents does. A generic banner had to hedge across both.
+   */
+  const configPrerequisite =
+    source === 'upload-labeled' ? null : (
+      <Alert type="info" header={source === 'generate' ? 'Generation needs a configuration' : 'Labeling needs a configuration'}>
+        <SpaceBetween size="xxs">
           <Box>
-            <b>Documents</b> — upload them here, or point at ones you have already processed.
-          </Box>
-          <Box>
-            <b>A configuration</b> that says what to extract — the fields you care about, per document class. Labeling cannot be generated
-            without one.
+            {source === 'generate'
+              ? 'Synthetic documents are generated from a configuration — the document classes and fields it defines are what gets created and labeled.'
+              : source === 'existing-files'
+                ? 'Documents without an existing baseline arrive unlabeled. Generating draft labels for those needs a configuration that says what to extract: the fields you care about, per document class.'
+                : 'These documents arrive without ground truth. Generating draft labels for them needs a configuration that says what to extract: the fields you care about, per document class.'}
           </Box>
           <Box fontSize="body-s">
             No configuration yet? <Link href={`#${DISCOVERY_PATH}`}>Discovery</Link> infers classes and fields from example documents, or
@@ -322,6 +331,10 @@ const CreateTestSetWizard = ({
           </Box>
         </SpaceBetween>
       </Alert>
+    );
+
+  const sourceStep = (
+    <SpaceBetween size="l">
       <FormField label="How do you want to create this test set?" stretch>
         <Tiles
           value={source}
@@ -347,10 +360,14 @@ const CreateTestSetWizard = ({
   // Generation collects its own name (as a destination, which may also be an
   // existing set), so it skips the shared name/description/class fields entirely.
   const configureStep = isGenerate ? (
-    generateForm.fields
+    <SpaceBetween size="l">
+      {configPrerequisite}
+      {generateForm.fields}
+    </SpaceBetween>
   ) : (
     <SpaceBetween size="l">
       {error && <Alert type="error">{error}</Alert>}
+      {configPrerequisite}
 
       <FormField
         label="Name"
@@ -482,11 +499,13 @@ const CreateTestSetWizard = ({
               ]),
         ]}
       />
+      {/* What happens after creating, not what is required — the configuration
+          prerequisite is stated on the Configure step, and repeating it here would
+          be the third time. */}
       {source === 'upload-documents' && (
         <Alert type="info" header="Next step after this">
-          This set arrives without ground truth. Open it and choose <strong>Generate draft labels</strong> to label it with the active
-          configuration, then review the documents with the most confidence alerts. Labeling needs a configuration that defines what to
-          extract — if you do not have one yet, start with <Link href={`#${DISCOVERY_PATH}`}>Discovery</Link>.
+          This set arrives without ground truth. Open it and choose <strong>Generate draft labels</strong>, then review the documents with
+          the most confidence alerts.
         </Alert>
       )}
     </SpaceBetween>
