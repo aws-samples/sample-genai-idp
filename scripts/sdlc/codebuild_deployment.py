@@ -1474,6 +1474,25 @@ def _hook_iam_role(iam, role_name):
     return role_arn
 
 
+def _hook_lambda_runtime():
+    """Lambda runtime string matching the interpreter building the hook zip.
+
+    Falls back to python3.12 if the build interpreter is outside the range Lambda
+    supports, since a wrong-but-supported runtime at least fails with a clear
+    import error rather than an InvalidParameterValueException at create time.
+    """
+    import sys
+
+    minor = sys.version_info.minor
+    if sys.version_info.major == 3 and 9 <= minor <= 13:
+        return f"python3.{minor}"
+    print(
+        f"  ⚠️  build interpreter python3.{minor} has no matching Lambda runtime; "
+        f"falling back to python3.12"
+    )
+    return "python3.12"
+
+
 def _build_hook_zip(path):
     """Zip the hook source together with idp_common and its import-time deps.
 
@@ -1590,7 +1609,14 @@ def test_step14_pipeline_hooks(stack_name):
             try:
                 lam.create_function(
                     FunctionName=fn_name,
-                    Runtime="python3.12",
+                    # Match the runtime to the interpreter that BUILT the zip.
+                    # pydantic_core ships a compiled extension
+                    # (_pydantic_core.cpython-3XX-*.so), so a zip built on 3.12
+                    # and run on a 3.13 Lambda (or vice versa) fails at cold
+                    # start with an opaque ModuleNotFoundError. Hardcoding 3.12
+                    # happens to match today's buildspec, but would break
+                    # silently the day that buildspec's python is bumped.
+                    Runtime=_hook_lambda_runtime(),
                     Role=role_arn,
                     Handler="index.lambda_handler",
                     Code={"ZipFile": code},
@@ -1661,7 +1687,9 @@ def test_step14_pipeline_hooks(stack_name):
         for point in ("preprocessing", "postprocessing"):
             cfg[point] = {
                 "enabled": True,
-                "featureId": "ci-hook-test",
+                # Same id as the Lambda's idp:feature-id tag, so the config and
+                # the ABAC grant cannot drift apart.
+                "featureId": _HOOK_FEATURE_ID,
                 "arn": hook_arn,
                 # `continue` on BOTH points: a hook fault must not fail the
                 # document and turn a coverage test into a flaky gate. The
@@ -1705,9 +1733,13 @@ def test_step14_pipeline_hooks(stack_name):
         # --- 3. Process a document pinned to that version ------------------
         print("  Processing a document with the hook registered...")
         batch_id = "test-pipeline-hooks"
+        # `--dir` takes a DIRECTORY (file_okay=False) and run-inference has no
+        # short flags at all, so `-d <file>` is rejected outright. Select the one
+        # document with --file-pattern, exactly as Steps 6/8 do.
         run_command(
             f"idp-cli run-inference --stack-name {stack_name} "
-            f"-d samples/lending_package.pdf --batch-id {batch_id} "
+            f"--dir samples/ --file-pattern lending_package.pdf "
+            f"--batch-id {batch_id} "
             f"--config-version {config_version} --monitor",
             check=True,
             timeout=900,
@@ -1728,32 +1760,60 @@ def test_step14_pipeline_hooks(stack_name):
                 "error": "StateMachineArn missing from stack outputs",
             }
 
+        # Find OUR execution's dispatcher results. This must key off the config
+        # version, not just the hook point: Step 14 runs in the parallel pool, and
+        # Steps 3-11 push documents through this SAME state machine using configs
+        # with no hooks — so every one of their executions also emits
+        # `{hookPoint: preprocessing|postprocessing, invoked: 0}`. Matching on
+        # hook point alone would latch onto one of those, "find" both points at
+        # invoked=0, and report a false failure while our hook had run perfectly.
+        #
+        # Filtering on configVersion is exact (only our document is pinned to it)
+        # and doubles as the assertion that the dispatcher resolved the version we
+        # registered the hook in — the diagnostic that #599 lacked.
         sfn = boto3.client("stepfunctions", config=_THROTTLE_RETRY_CONFIG)
         found = {}
-        for ex in sfn.list_executions(
-            stateMachineArn=sm_arn, statusFilter="SUCCEEDED", maxResults=25
-        ).get("executions", []):
-            hist = sfn.get_execution_history(
-                executionArn=ex["executionArn"], reverseOrder=True, maxResults=200
-            ).get("events", [])
-            for event in hist:
-                det = event.get("taskSucceededEventDetails") or {}
-                out = det.get("output") or ""
-                if '"hookPoint"' not in out:
-                    continue
-                try:
-                    payload = json.loads(out).get("Payload") or {}
-                except (ValueError, TypeError):
-                    continue
-                point = payload.get("hookPoint")
-                if point in ("preprocessing", "postprocessing"):
-                    # Keep the richest record per point.
-                    if payload.get("invoked", 0) >= found.get(point, {}).get(
-                        "invoked", -1
-                    ):
-                        found[point] = payload
-            if len(found) == 2:
+        scanned = 0
+        next_token = None
+        # Cap the sweep: with ~10 parallel steps the target execution is near the
+        # front, but Step 6 alone submits several documents, so one page is not a
+        # safe assumption.
+        while scanned < 200 and len(found) < 2:
+            kwargs = {
+                "stateMachineArn": sm_arn,
+                "statusFilter": "SUCCEEDED",
+                "maxResults": 100,
+            }
+            if next_token:
+                kwargs["nextToken"] = next_token
+            page = sfn.list_executions(**kwargs)
+            for ex in page.get("executions", []):
+                scanned += 1
+                hist = sfn.get_execution_history(
+                    executionArn=ex["executionArn"], reverseOrder=True, maxResults=200
+                ).get("events", [])
+                for event in hist:
+                    det = event.get("taskSucceededEventDetails") or {}
+                    out = det.get("output") or ""
+                    if '"hookPoint"' not in out:
+                        continue
+                    try:
+                        payload = json.loads(out).get("Payload") or {}
+                    except (ValueError, TypeError):
+                        continue
+                    point = payload.get("hookPoint")
+                    if point not in ("preprocessing", "postprocessing"):
+                        continue
+                    # Only OUR document's execution counts.
+                    if payload.get("configVersion") != config_version:
+                        continue
+                    found[point] = payload
+                if len(found) == 2:
+                    break
+            next_token = page.get("nextToken")
+            if not next_token:
                 break
+        print(f"  (scanned {scanned} SUCCEEDED execution(s) for {config_version})")
 
         for point in ("preprocessing", "postprocessing"):
             payload = found.get(point)
@@ -1761,9 +1821,11 @@ def test_step14_pipeline_hooks(stack_name):
                 return {
                     "success": False,
                     "error": (
-                        f"No {point} dispatcher result found in any SUCCEEDED "
-                        f"execution — the hook state may not be wired into the "
-                        f"state machine"
+                        f"No {point} dispatcher result for configVersion "
+                        f"{config_version!r} in {scanned} scanned SUCCEEDED "
+                        f"execution(s) — either the {point} hook state is not "
+                        f"wired into the state machine, or our document's "
+                        f"execution did not resolve that config version"
                     ),
                 }
             if payload.get("invoked", 0) < 1:
