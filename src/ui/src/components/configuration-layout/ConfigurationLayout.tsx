@@ -604,6 +604,14 @@ const ConfigurationLayout = (): React.JSX.Element => {
     return formChanged || descriptionChanged;
   }, [formValues, mergedConfig, versionDescription, currentVersion?.description]);
 
+  // A new edit makes the "saved successfully" confirmation stale: the unsaved-changes
+  // banner takes over from here, and showing both at once is confusing. Called from the
+  // edit handlers rather than derived from hasUnsavedChanges, which flips true briefly
+  // while formValues re-syncs from the freshly saved mergedConfig.
+  const dismissSaveSuccess = useCallback(() => {
+    setSaveSuccess(false);
+  }, []);
+
   // Warn user before leaving page with unsaved changes
   // Both beforeunload (browser close/refresh) and hashchange (SPA navigation)
   useEffect(() => {
@@ -1103,6 +1111,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handle changes in the JSON editor
   const handleJsonEditorChange = (value: string | undefined): void => {
+    dismissSaveSuccess();
     setJsonContent(value ?? '');
     try {
       const parsedValue = JSON.parse(value ?? '');
@@ -1124,6 +1133,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handle changes in the YAML editor
   const handleYamlEditorChange = (value: string | undefined): void => {
+    dismissSaveSuccess();
     setYamlContent(value ?? '');
     try {
       const parsedValue = yaml.load(value ?? '') as Record<string, unknown>;
@@ -1578,6 +1588,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
   };
 
   const handleFormChange = (newValues: Record<string, unknown>): void => {
+    dismissSaveSuccess();
     setFormValues(newValues);
     try {
       // Update both JSON and YAML content
@@ -2657,10 +2668,14 @@ const ConfigurationLayout = (): React.JSX.Element => {
                   onTabChange={setConfigBuilderActiveTab}
                   showRuleSchema={showRuleSchema}
                   versionDescription={versionDescription}
-                  onDescriptionChange={setVersionDescription}
+                  onDescriptionChange={(description: string) => {
+                    dismissSaveSuccess();
+                    setVersionDescription(description);
+                  }}
                   onSchemaChange={(schemaData: unknown, isDirty: boolean) => {
                     setExtractionSchema(schemaData as unknown[] | null);
                     if (isDirty) {
+                      dismissSaveSuccess();
                       const updatedConfig = { ...formValues };
                       // CRITICAL: Always set classes, even if empty array (to support wipe all functionality)
                       // Handle null (no classes) by setting empty array
@@ -2695,6 +2710,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                   onRuleSchemaChange={(schemaData: unknown, isDirty: boolean) => {
                     setRuleSchema(schemaData as unknown[] | null);
                     if (isDirty) {
+                      dismissSaveSuccess();
                       const updatedConfig = { ...formValues };
                       // CRITICAL: Always set policy_classes, even if empty array
                       if (schemaData === null) {
