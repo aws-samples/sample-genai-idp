@@ -1760,25 +1760,31 @@ def test_step14_pipeline_hooks(stack_name):
                 "error": "StateMachineArn missing from stack outputs",
             }
 
-        # Find OUR execution's dispatcher results. This must key off the config
-        # version, not just the hook point: Step 14 runs in the parallel pool, and
-        # Steps 3-11 push documents through this SAME state machine using configs
-        # with no hooks — so every one of their executions also emits
-        # `{hookPoint: preprocessing|postprocessing, invoked: 0}`. Matching on
-        # hook point alone would latch onto one of those, "find" both points at
-        # invoked=0, and report a false failure while our hook had run perfectly.
+        # Locate OUR execution, then read its history IN FULL.
         #
-        # Filtering on configVersion is exact (only our document is pinned to it)
-        # and doubles as the assertion that the dispatcher resolved the version we
-        # registered the hook in — the diagnostic that #599 lacked.
+        # Two traps here, both hit in real pipeline runs:
+        #
+        # 1. Step 14 shares this state machine with the other parallel steps, and
+        #    since PreprocessingHook is StartAt and PostprocessingHook is on the
+        #    shared tail, EVERY execution emits both hook results (invoked=0 for a
+        #    hook-less config). Matching on hook point alone latches onto a
+        #    foreign execution. So the target execution is identified by its
+        #    INPUT's config_version — only our document is pinned to it — via a
+        #    cheap describe_execution, with no history scan at all.
+        #
+        # 2. get_execution_history(reverseOrder=True, maxResults=200) returns the
+        #    NEWEST 200 events. PreprocessingHook is the FIRST task, so on any
+        #    execution with >200 events (a multi-section document — measured at
+        #    240 events for one real doc) that window never reaches it, while
+        #    PostprocessingHook near the end is always found. That asymmetry is
+        #    exactly the "No preprocessing dispatcher result" failure. The history
+        #    is therefore paginated FORWARD and in full.
         sfn = boto3.client("stepfunctions", config=_THROTTLE_RETRY_CONFIG)
-        found = {}
+
+        target_arn = None
         scanned = 0
         next_token = None
-        # Cap the sweep: with ~10 parallel steps the target execution is near the
-        # front, but Step 6 alone submits several documents, so one page is not a
-        # safe assumption.
-        while scanned < 200 and len(found) < 2:
+        while scanned < 300 and not target_arn:
             kwargs = {
                 "stateMachineArn": sm_arn,
                 "statusFilter": "SUCCEEDED",
@@ -1789,31 +1795,57 @@ def test_step14_pipeline_hooks(stack_name):
             page = sfn.list_executions(**kwargs)
             for ex in page.get("executions", []):
                 scanned += 1
-                hist = sfn.get_execution_history(
-                    executionArn=ex["executionArn"], reverseOrder=True, maxResults=200
-                ).get("events", [])
-                for event in hist:
-                    det = event.get("taskSucceededEventDetails") or {}
-                    out = det.get("output") or ""
-                    if '"hookPoint"' not in out:
-                        continue
-                    try:
-                        payload = json.loads(out).get("Payload") or {}
-                    except (ValueError, TypeError):
-                        continue
-                    point = payload.get("hookPoint")
-                    if point not in ("preprocessing", "postprocessing"):
-                        continue
-                    # Only OUR document's execution counts.
-                    if payload.get("configVersion") != config_version:
-                        continue
-                    found[point] = payload
-                if len(found) == 2:
+                try:
+                    raw = sfn.describe_execution(
+                        executionArn=ex["executionArn"]
+                    ).get("input") or "{}"
+                    doc_in = (json.loads(raw).get("document") or {})
+                except (ValueError, TypeError, KeyError):
+                    continue
+                if doc_in.get("config_version") == config_version:
+                    target_arn = ex["executionArn"]
                     break
             next_token = page.get("nextToken")
             if not next_token:
                 break
-        print(f"  (scanned {scanned} SUCCEEDED execution(s) for {config_version})")
+
+        if not target_arn:
+            return {
+                "success": False,
+                "error": (
+                    f"No SUCCEEDED execution found whose input pins "
+                    f"config_version={config_version!r} (scanned {scanned}). The "
+                    f"document either failed to process or was not pinned to that "
+                    f"version by run-inference --config-version."
+                ),
+            }
+        print(f"  ✓ found our execution ({scanned} scanned): {target_arn.rsplit(':', 1)[-1]}")
+
+        found = {}
+        hist_token = None
+        pages = 0
+        while pages < 12:
+            hkw = {"executionArn": target_arn, "maxResults": 1000}
+            if hist_token:
+                hkw["nextToken"] = hist_token
+            hist = sfn.get_execution_history(**hkw)
+            for event in hist.get("events", []):
+                det = event.get("taskSucceededEventDetails") or {}
+                out = det.get("output") or ""
+                if '"hookPoint"' not in out:
+                    continue
+                try:
+                    payload = json.loads(out).get("Payload") or {}
+                except (ValueError, TypeError):
+                    continue
+                point = payload.get("hookPoint")
+                if point in ("preprocessing", "postprocessing"):
+                    found[point] = payload
+            hist_token = hist.get("nextToken")
+            pages += 1
+            if not hist_token:
+                break
+        print(f"  (read {pages} history page(s); hook points found: {sorted(found)})")
 
         for point in ("preprocessing", "postprocessing"):
             payload = found.get(point)
@@ -1847,11 +1879,6 @@ def test_step14_pipeline_hooks(stack_name):
         # postprocessing is the last writer, so its marker is the one that must
         # survive into the tracking row.
         post = found["postprocessing"]
-        if _HOOK_MARKER_KEY not in json.dumps(post.get("document") or {}):
-            # The dispatcher returns a compressed reference, so the marker is
-            # usually not inline here — fall back to the tracking row, which is
-            # the assertion that actually matters.
-            print("  (marker not inline in the dispatcher result; checking DynamoDB)")
         if not post.get("documentUpdatedBy"):
             return {
                 "success": False,
@@ -1863,22 +1890,26 @@ def test_step14_pipeline_hooks(stack_name):
             }
         print(f"  ✓ document updated by {post['documentUpdatedBy']}")
 
-        # The marker must appear in the PERSISTED document. Note the two hook
-        # points write it to different places: at `postprocessing` the document
-        # has sections, so the marker lands in a section's `attributes`; at
-        # `preprocessing` there are no sections yet (OCR/classification have not
-        # run), so only the document-level `summary_report_uri` backstop carries
-        # it — and postprocessing, running later, overwrites that field. So this
-        # asserts the POSTPROCESSING marker specifically, which is the one that
-        # must be the final persisted value.
+        # The marker must appear in the PERSISTED document, and must be the
+        # POSTPROCESSING one: both hooks write `summary_report_uri`, so the value
+        # that survives proves the LAST writer's mutation is what got persisted.
         marker_seen = _find_marker_in_tracking(stack_name, outputs)
         if not marker_seen:
             return {
                 "success": False,
                 "error": (
-                    f"Hook ran and its update was accepted, but {_HOOK_MARKER_KEY} "
-                    f"is absent from the persisted document — the mutation did "
-                    f"not survive into the tracking row"
+                    f"Hook ran and its update was accepted, but no tracking row "
+                    f"carries SummaryReportUri starting with {_HOOK_MARKER_KEY!r} "
+                    f"— the mutation did not survive into the persisted document"
+                ),
+            }
+        if "postprocessing" not in marker_seen:
+            return {
+                "success": False,
+                "error": (
+                    f"The persisted marker is not the postprocessing one "
+                    f"({marker_seen}) — the final document does not reflect the "
+                    f"LAST hook to run"
                 ),
             }
         print(f"  ✓ marker persisted to the tracking row: {marker_seen}")
@@ -1921,15 +1952,22 @@ def test_step14_pipeline_hooks(stack_name):
 
 
 def _find_marker_in_tracking(stack_name, outputs):
-    """Return the hook marker from the persisted document, or None.
+    """Return the persisted marker value from the tracking row, or None.
 
-    The tracking row stores the document; the hook wrote its marker into
-    `metadata`. Scans this batch's documents rather than assuming a key, since
-    the object key is derived from the upload path.
+    The hook writes its marker to `summary_report_uri`, which the DynamoDB
+    document service persists as the `SummaryReportUri` attribute. That choice is
+    deliberate: the tracking row stores only a REDUCED view of each section
+    (`Id`/`Class`/`PageIds`/`OutputJSONUri`) and drops section `attributes`
+    entirely, so a marker written only into section attributes proves the
+    in-flight mutation but can never be observed here. `Document.metadata` is
+    worse still — `to_dict()` drops it before serialization.
+
+    Checks the `SummaryReportUri` attribute explicitly rather than string-matching
+    the whole item, so a failure says which document was found and what it held.
     """
     table_name = outputs.get("TrackingTableName")
     if not table_name:
-        # Not exported by every template revision; fall back to a name lookup.
+        # Not exported by every template revision; fall back to a resource lookup.
         cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
         for page in cf.get_paginator("list_stack_resources").paginate(
             StackName=stack_name
@@ -1946,8 +1984,6 @@ def _find_marker_in_tracking(stack_name, outputs):
         return None
 
     ddb = boto3.client("dynamodb", config=_THROTTLE_RETRY_CONFIG)
-    # Bounded scan: the smoke-test stack is fresh, so this is small. Looking for
-    # any document carrying our marker.
     for page in ddb.get_paginator("scan").paginate(
         TableName=table_name,
         # filtered-scan-ok: bounded to a fresh smoke-test stack, and the
@@ -1957,9 +1993,11 @@ def _find_marker_in_tracking(stack_name, outputs):
         PaginationConfig={"MaxItems": 500},
     ):
         for item in page.get("Items", []):
-            blob = json.dumps(item)
-            if _HOOK_MARKER_KEY in blob:
-                return f"{item.get('PK', {}).get('S', '?')}"
+            uri = (item.get("SummaryReportUri") or {}).get("S") or ""
+            if uri.startswith(_HOOK_MARKER_KEY):
+                pk = (item.get("PK") or {}).get("S", "?")
+                # postprocessing runs last, so it must be the final writer.
+                return f"{pk} -> SummaryReportUri={uri!r}"
     return None
 
 

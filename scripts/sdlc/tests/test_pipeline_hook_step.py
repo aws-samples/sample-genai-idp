@@ -265,27 +265,30 @@ class TestStepInvocationCorrectness:
         assert "--file-pattern lending_package.pdf" in src
         assert "-d samples/" not in src, "run-inference has no -d short flag"
 
-    def test_execution_scan_filters_on_config_version(self, cbd):
+    def test_scan_is_scoped_to_one_identified_execution(self, cbd):
         """Step 14 shares the state machine with the other parallel steps, whose
         hook-less documents ALSO emit `{hookPoint: ..., invoked: 0}` at both
-        points. Without a configVersion filter the scan latches onto one of those
-        and reports a false failure."""
+        points — PreprocessingHook is StartAt and PostprocessingHook is on the
+        shared tail, so EVERY execution emits both. Collecting payloads across
+        executions can therefore latch onto a foreign one. The scan must first
+        identify our execution, then read only that one's history."""
         src = self._src(cbd)
-        assert 'payload.get("configVersion") != config_version' in src, (
-            "the scan must accept only OUR document's dispatcher results"
+        assert "target_arn" in src, (
+            "the step must resolve a single target execution before reading history"
+        )
+        assert 'executionArn": target_arn' in src or "executionArn\": target_arn" in src or (
+            "target_arn" in src and "get_execution_history" in src
         )
 
-    def test_execution_scan_does_not_stop_on_a_foreign_result(self, cbd):
-        """The original `if len(found) == 2: break` could satisfy itself with two
-        invoked=0 records from another step. With the configVersion filter a
-        `found` entry is by definition ours, so the break is safe — assert the
-        filter precedes it rather than the break being removed."""
+    def test_target_is_resolved_before_history_is_read(self, cbd):
+        """Ordering matters: resolving the target first is what makes the
+        collected payloads unambiguously ours."""
         src = self._src(cbd)
-        filter_at = src.index('payload.get("configVersion") != config_version')
-        break_at = src.index("if len(found) == 2:")
-        assert filter_at < break_at, (
-            "the configVersion filter must run before the early break"
-        )
+        resolve_at = src.index('doc_in.get("config_version") == config_version')
+        # Match the CALL, not the explanatory comment that names the old
+        # reverseOrder form above it.
+        history_at = src.index("sfn.get_execution_history(**hkw)")
+        assert resolve_at < history_at
 
     def test_feature_id_is_shared_between_tag_and_config(self, cbd):
         """The Lambda's idp:feature-id tag and the config section's featureId must
