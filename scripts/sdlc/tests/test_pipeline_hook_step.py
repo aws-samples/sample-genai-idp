@@ -240,3 +240,81 @@ class TestStepRegistration:
             "dispatcher cannot invoke a function not named GENAIIDP-*"
         )
         assert "list_tags" in src, "the tag should be verified, not assumed"
+
+
+@pytest.mark.unit
+class TestStepInvocationCorrectness:
+    """Pins the three bugs found auditing Step 14 before its second pipeline run.
+
+    All three would have failed the step (or, worse, passed/failed it for the
+    wrong reason) and none are reachable without a live stack, so they are
+    asserted against the step's source.
+    """
+
+    def _src(self, cbd):
+        import inspect
+
+        return inspect.getsource(cbd.test_step14_pipeline_hooks)
+
+    def test_run_inference_uses_dir_plus_file_pattern(self, cbd):
+        """`run-inference` declares NO short flags and its `--dir` is
+        `file_okay=False`, so `-d samples/lending_package.pdf` is rejected twice
+        over: unknown option, and a file where a directory is required."""
+        src = self._src(cbd)
+        assert "--dir samples/" in src
+        assert "--file-pattern lending_package.pdf" in src
+        assert "-d samples/" not in src, "run-inference has no -d short flag"
+
+    def test_execution_scan_filters_on_config_version(self, cbd):
+        """Step 14 shares the state machine with the other parallel steps, whose
+        hook-less documents ALSO emit `{hookPoint: ..., invoked: 0}` at both
+        points. Without a configVersion filter the scan latches onto one of those
+        and reports a false failure."""
+        src = self._src(cbd)
+        assert 'payload.get("configVersion") != config_version' in src, (
+            "the scan must accept only OUR document's dispatcher results"
+        )
+
+    def test_execution_scan_does_not_stop_on_a_foreign_result(self, cbd):
+        """The original `if len(found) == 2: break` could satisfy itself with two
+        invoked=0 records from another step. With the configVersion filter a
+        `found` entry is by definition ours, so the break is safe — assert the
+        filter precedes it rather than the break being removed."""
+        src = self._src(cbd)
+        filter_at = src.index('payload.get("configVersion") != config_version')
+        break_at = src.index("if len(found) == 2:")
+        assert filter_at < break_at, (
+            "the configVersion filter must run before the early break"
+        )
+
+    def test_feature_id_is_shared_between_tag_and_config(self, cbd):
+        """The Lambda's idp:feature-id tag and the config section's featureId must
+        come from the same constant; drift would leave the ABAC grant and the
+        registered owner disagreeing."""
+        src = self._src(cbd)
+        assert '"featureId": _HOOK_FEATURE_ID' in src
+
+
+@pytest.mark.unit
+class TestLambdaRuntimeAlignment:
+    """pydantic_core is a COMPILED extension, so the zip and the Lambda runtime
+    must agree on the Python minor version or the hook dies at cold start."""
+
+    def test_runtime_matches_the_building_interpreter(self, cbd):
+        import sys
+
+        assert cbd._hook_lambda_runtime() == f"python3.{sys.version_info.minor}"
+
+    def test_runtime_is_a_supported_lambda_value(self, cbd):
+        assert cbd._hook_lambda_runtime() in {
+            f"python3.{m}" for m in range(9, 14)
+        }
+
+    def test_create_function_does_not_hardcode_a_runtime(self, cbd):
+        import inspect
+
+        src = inspect.getsource(cbd.test_step14_pipeline_hooks)
+        assert "Runtime=_hook_lambda_runtime()" in src
+        assert 'Runtime="python3.12"' not in src, (
+            "a hardcoded runtime silently breaks when the buildspec python moves"
+        )
