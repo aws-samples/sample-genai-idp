@@ -433,6 +433,48 @@ The persisted-marker assertion therefore checks the **postprocessing** marker,
 which is correctly the final value; `preprocessing` is proven to have run by its
 own `invoked` count.
 
+#### Validating Step 14 without a pipeline round-trip
+
+A pipeline round-trip is ~70 minutes, so debug the hook **outside** it. Deploy the
+zip the step builds to a throwaway Lambda and invoke it with a synthetic
+dispatcher event pointing at a **real** compressed document from a live stack's
+working bucket:
+
+```python
+# build the exact zip the step would upload
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("cb", "scripts/sdlc/codebuild_deployment.py")
+cb = importlib.util.module_from_spec(spec); spec.loader.exec_module(cb)
+cb._build_hook_zip("/tmp/hook.zip")
+```
+
+Then `aws lambda create-function` it with `MARKER_KEY` + `WORKING_BUCKET`, tagged
+`idp:feature-id=<anything>`, and invoke with:
+
+```json
+{"hookPoint": "postprocessing", "document": {"compressed": true,
+ "s3_uri": "s3://<working-bucket>/compressed_documents/<doc>/<...>_evaluation_state.json",
+ "document_id": "<doc>", "num_pages": 1, "sections": ["1"]},
+ "args": [{"key": "note", "value": "manual"}]}
+```
+
+This is how the missing **PyYAML** dependency was found: the zip imported fine
+locally but died at Lambda cold start with `ModuleNotFoundError: No module named
+'yaml'`, because `load_hook_document -> Document.decompress ->
+idp_common.utils -> idp_common.config.models -> configuration_manager` imports it.
+Iterating this way is ~1 minute per attempt instead of ~70. Remember to delete
+the function and role afterwards.
+
+Two gotchas the same technique surfaced, worth knowing before writing any hook:
+
+- `Document.metadata` is dropped by `to_dict()`, and the tracking row stores only
+  a reduced section view (`Id`/`Class`/`PageIds`/`OutputJSONUri`) — so a mutation
+  written to either is invisible to a persistence assertion. `summary_report_uri`
+  IS persisted (as `SummaryReportUri`).
+- `boto3`/`botocore` must NOT be vendored into a hook zip: the Lambda runtime
+  supplies them, and including them pushed the package from 4.4MB to 62MB, past
+  the 50MB direct-upload limit.
+
 ---
 
 ## Additional Deployment Tests: the deployment-variant probe framework
