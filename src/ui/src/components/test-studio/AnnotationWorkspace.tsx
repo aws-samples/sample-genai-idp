@@ -128,6 +128,9 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const [flashItems, setFlashItems] = useState<FlashbarProps.MessageDefinition[]>([]);
   // Incremented on each completed document to fire the confetti burst.
   const [celebration, setCelebration] = useState(0);
+  // Reviewed documents are hidden by default so the queue shows only outstanding
+  // work; this reopens them so a confirmed label can be re-checked or changed.
+  const [showReviewed, setShowReviewed] = useState(false);
 
   /**
    * What the review is buying, refreshed as documents are completed.
@@ -177,7 +180,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
       try {
         const response = await client.graphql({
           query: getAnnotationQueue,
-          variables: { testSetId, limit: QUEUE_PAGE_SIZE },
+          variables: { testSetId, limit: QUEUE_PAGE_SIZE, includeCompleted: showReviewed },
         });
         const data = response.data?.getAnnotationQueue as QueueState | null;
         if (!data) {
@@ -210,7 +213,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
         setIsLoading(false);
       }
     },
-    [testSetId, requestedDoc],
+    [testSetId, requestedDoc, showReviewed],
   );
 
   useEffect(() => {
@@ -427,7 +430,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
       {/* Skipping advances the cursor without marking anything reviewed, so a
           correct document needs this to ever leave the queue. */}
       <Button variant="primary" onClick={handleConfirmCorrect} loading={isConfirming} disabled={isLoading || !selected.reviewObjectKey}>
-        Labels are correct — mark reviewed
+        {selected.reviewed ? 'Re-confirm labels' : 'Labels are correct — mark reviewed'}
       </Button>
     </SpaceBetween>
   );
@@ -464,6 +467,11 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           >
             Annotate: {testSetId}
           </Header>
+          {showReviewed && (
+            <Alert type="info" action={<Button onClick={() => setShowReviewed(false)}>Hide reviewed</Button>}>
+              Showing documents that have already been reviewed. Re-confirming one records the review again.
+            </Alert>
+          )}
           {/* The full link is rendered selectable alongside the copy button so the
               sharer can verify the URL before pasting it. */}
           {!isAnnotatorOnly && (
@@ -564,8 +572,12 @@ const AnnotationWorkspace = (): React.JSX.Element => {
         )}
 
         {queue && queue.documents.length === 0 && !error && !labelJobRunning && (
-          <Alert type="success" header="Queue complete">
-            Every document in this test set has been reviewed. Nothing left to annotate.
+          <Alert
+            type="success"
+            header="Queue complete"
+            action={!showReviewed && <Button onClick={() => setShowReviewed(true)}>Show reviewed documents</Button>}
+          >
+            Every document in this test set has been reviewed. Reopen a document to check or change a label you already confirmed.
           </Alert>
         )}
 
@@ -619,7 +631,9 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                       const item = detail.selectedItems[0];
                       if (item) selectDocument(item);
                     }}
-                    isItemDisabled={(item) => item.reviewed}
+                    // Reviewed items are selectable when explicitly shown, so a
+                    // confirmed label can be re-checked or corrected.
+                    isItemDisabled={(item) => item.reviewed && !showReviewed}
                     cardDefinition={{
                       header: (item) => (
                         <Box fontSize="body-s" fontWeight="bold">
