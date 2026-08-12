@@ -1489,6 +1489,40 @@ def _hook_iam_role(iam, role_name):
     return role_arn
 
 
+def _dump_hook_logs(fn_name, limit=40):
+    """Print the hook Lambda's recent log lines.
+
+    Called only when Step 14 fails. A pipeline round-trip is ~70 minutes, so the
+    single most valuable thing a failure can do is carry the hook's own
+    traceback out with it instead of forcing another cycle to learn one fact.
+    Best-effort: never raises, and says so when there is nothing to show (no log
+    group means the hook was never invoked at all, which is itself the answer).
+    """
+    lg = f"/aws/lambda/{fn_name}"
+    try:
+        logs = boto3.client("logs", config=_THROTTLE_RETRY_CONFIG)
+        streams = logs.describe_log_streams(
+            logGroupName=lg, orderBy="LastEventTime", descending=True, limit=3
+        ).get("logStreams", [])
+        if not streams:
+            print(f"  [diag] no log streams in {lg} — the hook was never invoked")
+            return
+        print(f"  [diag] last log lines from {lg}:")
+        for st in streams[:2]:
+            ev = logs.get_log_events(
+                logGroupName=lg,
+                logStreamName=st["logStreamName"],
+                limit=limit,
+                startFromHead=False,
+            ).get("events", [])
+            for e in ev:
+                msg = (e.get("message") or "").rstrip()
+                if msg:
+                    print(f"    | {msg[:300]}")
+    except Exception as exc:  # noqa: BLE001 — diagnostics must never mask the real failure
+        print(f"  [diag] could not read {lg}: {exc}")
+
+
 def _wait_lambda_ready(lam, fn_name, attempts=20, delay=3):
     """Block until the function has no update in flight.
 
@@ -1657,6 +1691,7 @@ def test_step14_pipeline_hooks(stack_name):
     lam = boto3.client("lambda", config=_THROTTLE_RETRY_CONFIG)
     iam = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
     created_fn = created_role = False
+    outcome = {"ok": False}
 
     try:
         import yaml
@@ -2022,6 +2057,7 @@ def test_step14_pipeline_hooks(stack_name):
         print(f"  ✓ marker persisted to the tracking row: {marker_seen}")
 
         print("✅ Pipeline-hook end-to-end test passed (preprocessing + postprocessing)")
+        outcome["ok"] = True
         return {"success": True}
 
     except Exception as e:  # noqa: BLE001
@@ -2029,6 +2065,10 @@ def test_step14_pipeline_hooks(stack_name):
         return {"success": False, "error": f"Pipeline-hook test failed: {e}"}
 
     finally:
+        # On failure, carry the hook's own logs out with the error — a pipeline
+        # round-trip is ~70 minutes, so guessing costs far more than dumping.
+        if not outcome["ok"] and created_fn:
+            _dump_hook_logs(fn_name)
         # Teardown is NOT optional: a leftover hook ARN pointing at a deleted
         # Lambda is exactly the stale-ARN state that fails every subsequent
         # document at a flat hook point. The config version is disposable (never

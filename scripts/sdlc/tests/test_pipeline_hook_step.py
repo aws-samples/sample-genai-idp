@@ -382,3 +382,39 @@ class TestWorkingBucketWiring:
         src = inspect.getsource(cbd._resolve_working_bucket)
         assert 'LogicalResourceId") == "WorkingBucket"' in src
         assert "AWS::S3::Bucket" in src
+
+
+@pytest.mark.unit
+class TestFailureDiagnostics:
+    """A pipeline round-trip is ~70 minutes, so a failure must carry the hook's
+    own traceback out with it rather than forcing another cycle to learn one
+    fact."""
+
+    def test_logs_are_dumped_on_failure_only(self, cbd):
+        import inspect
+
+        src = inspect.getsource(cbd.test_step14_pipeline_hooks)
+        assert '_dump_hook_logs(fn_name)' in src
+        assert 'if not outcome["ok"] and created_fn:' in src, (
+            "dump on failure only — a passing run should stay quiet"
+        )
+
+    def test_success_path_marks_the_outcome(self, cbd):
+        import inspect
+
+        src = inspect.getsource(cbd.test_step14_pipeline_hooks)
+        assert 'outcome["ok"] = True' in src
+
+    def test_log_dump_never_raises(self, cbd):
+        """Diagnostics must not mask the real failure."""
+        import inspect
+
+        src = inspect.getsource(cbd._dump_hook_logs)
+        assert "except Exception" in src
+
+    def test_log_dump_reports_a_missing_log_group_meaningfully(self, cbd):
+        """No log group means the hook was never invoked, which is the answer."""
+        import inspect
+
+        src = inspect.getsource(cbd._dump_hook_logs)
+        assert "never invoked" in src
