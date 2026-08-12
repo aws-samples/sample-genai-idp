@@ -1384,7 +1384,17 @@ def lambda_handler(event, context):
     to_dict() drops entirely — writing the marker there looks correct and
     silently never persists.
     """
-    document = load_hook_document(event)
+    # WORKING_BUCKET is required to resolve the COMPRESSED document reference the
+    # dispatcher hands over at postprocessing; load_hook_document raises without
+    # it. Read explicitly so a missing env var fails with a clear message here
+    # rather than deep inside idp_common.
+    working_bucket = os.environ.get("WORKING_BUCKET") or ""
+    if not working_bucket:
+        raise RuntimeError(
+            "WORKING_BUCKET is not set on this hook Lambda; a compressed "
+            "document reference cannot be resolved"
+        )
+    document = load_hook_document(event, working_bucket=working_bucket)
     args = {a["key"]: a.get("value") for a in (event.get("args") or [])}
     point = event.get("hookPoint")
 
@@ -1412,7 +1422,12 @@ def lambda_handler(event, context):
             section.attributes[MARKER_KEY] = marker
             break
 
-    return updated_document_result(document, ciHookRan=True, ciHookPoint=point)
+    return updated_document_result(
+        document,
+        working_bucket=working_bucket,
+        ciHookRan=True,
+        ciHookPoint=point,
+    )
 '''
 
 
@@ -1472,6 +1487,53 @@ def _hook_iam_role(iam, role_name):
         ),
     )
     return role_arn
+
+
+def _wait_lambda_ready(lam, fn_name, attempts=20, delay=3):
+    """Block until the function has no update in flight.
+
+    Lambda rejects a second mutating call while one is pending
+    (ResourceConflictException: "The operation cannot be performed at this time.
+    An update is in progress"), so the create -> tag -> configure sequence has to
+    wait between steps.
+    """
+    for _ in range(attempts):
+        try:
+            cfg = lam.get_function_configuration(FunctionName=fn_name)
+        except Exception:  # noqa: BLE001 — transient during creation
+            time.sleep(delay)
+            continue
+        if (
+            cfg.get("State") in (None, "Active")
+            and cfg.get("LastUpdateStatus") in (None, "Successful")
+        ):
+            return True
+        time.sleep(delay)
+    print(f"  ⚠️  {fn_name} still not settled; continuing")
+    return False
+
+
+def _resolve_working_bucket(stack_name):
+    """Physical name of the stack's WorkingBucket.
+
+    The hook Lambda MUST know this: at `postprocessing` the dispatcher hands over
+    a COMPRESSED document reference, and `idp_common.hooks.load_hook_document`
+    raises outright ("carries a compressed document reference but no working
+    bucket was given") unless WORKING_BUCKET is set. There is no stack Output for
+    it — the template only passes it down to nested stacks — so it is resolved
+    from the stack's resources.
+    """
+    cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+    for page in cf.get_paginator("list_stack_resources").paginate(
+        StackName=stack_name
+    ):
+        for r in page.get("StackResourceSummaries", []):
+            if (
+                r.get("ResourceType") == "AWS::S3::Bucket"
+                and r.get("LogicalResourceId") == "WorkingBucket"
+            ):
+                return r.get("PhysicalResourceId") or ""
+    return ""
 
 
 def _hook_lambda_runtime():
@@ -1569,15 +1631,18 @@ def test_step14_pipeline_hooks(stack_name):
 
     Deploys a real hook Lambda, registers it in a DEDICATED config version at
     both standalone hook points, processes one document pinned to that version,
-    and asserts three things that only a live stack can show:
+    and asserts four things that only a live stack can show:
 
-      1. the dispatcher actually INVOKED the hook (`invoked >= 1` in the state
-         machine's `HookResults`, plus the config version it resolved) — the one
-         assertion that distinguishes "ran and did nothing" from "never called";
-      2. the hook's `updatedDocument` reached the PERSISTED document, i.e. the
-         mutation survived past the workflow into the tracking row;
-      3. the deployed config SCHEMA carries the hook sections, so the fields an
-         admin edits in the UI exist on this stack.
+      1. the hook sections survive the config write/read round-trip, so the
+         dispatcher has something to call (and the deployed schema carries them);
+      2. the dispatcher actually INVOKED the hook at BOTH points (`invoked >= 1`
+         in the state machine's `HookResults`, plus the config version it
+         resolved) — the assertion that distinguishes "ran and did nothing" from
+         "never called";
+      3. the `updatedDocument` was ACCEPTED rather than refused by the
+         dispatcher's guardrails (`documentUpdatedBy` non-empty);
+      4. the mutation reached the PERSISTED document (the tracking row), and is
+         the POSTPROCESSING marker — i.e. the last writer won.
 
     Uses its own config version, so it never perturbs the parallel steps sharing
     this stack. Everything it creates is removed in `finally`.
@@ -1597,7 +1662,16 @@ def test_step14_pipeline_hooks(stack_name):
         import yaml
 
         # --- 1. Deploy the hook Lambda -------------------------------------
-        print(f"  Creating hook Lambda {fn_name}...")
+        working_bucket = _resolve_working_bucket(stack_name)
+        if not working_bucket:
+            return {
+                "success": False,
+                "error": (
+                    f"Could not resolve the WorkingBucket for {stack_name}; the "
+                    f"hook cannot resolve compressed document references without it"
+                ),
+            }
+        print(f"  Creating hook Lambda {fn_name} (working bucket {working_bucket})...")
         role_arn = _hook_iam_role(iam, role_name)
         created_role = True
         _build_hook_zip(zip_path)
@@ -1622,7 +1696,12 @@ def test_step14_pipeline_hooks(stack_name):
                     Code={"ZipFile": code},
                     Timeout=120,
                     MemorySize=512,
-                    Environment={"Variables": {"MARKER_KEY": _HOOK_MARKER_KEY}},
+                    Environment={
+                        "Variables": {
+                            "MARKER_KEY": _HOOK_MARKER_KEY,
+                            "WORKING_BUCKET": working_bucket,
+                        }
+                    },
                     # Load-bearing, not metadata: the dispatcher's ABAC
                     # condition (StringLike aws:ResourceTag/idp:feature-id)
                     # is the ONLY thing authorizing it to invoke a function
@@ -1651,14 +1730,42 @@ def test_step14_pipeline_hooks(stack_name):
                 "success": False,
                 "error": f"Could not resolve the ARN of hook Lambda {fn_name}",
             }
-        # Tag unconditionally rather than relying on create_function's Tags: the
-        # ResourceConflictException path above reuses a function left by an
-        # interrupted earlier run, and update_function_code does NOT set tags —
-        # so that function would be untagged and every dispatch would fail
-        # closed with AccessDenied.
+        # Tag AND set the environment unconditionally rather than relying on
+        # create_function's Tags/Environment: the ResourceConflictException path
+        # above reuses a function left by an interrupted earlier run, and
+        # update_function_code sets NEITHER. An untagged function fails every
+        # dispatch closed with AccessDenied; one without WORKING_BUCKET raises
+        # inside load_hook_document the moment it is handed a compressed
+        # document reference (which is what `postprocessing` always gets).
         lam.tag_resource(
             Resource=hook_arn, Tags={"idp:feature-id": _HOOK_FEATURE_ID}
         )
+        _wait_lambda_ready(lam, fn_name)
+        lam.update_function_configuration(
+            FunctionName=fn_name,
+            Environment={
+                "Variables": {
+                    "MARKER_KEY": _HOOK_MARKER_KEY,
+                    "WORKING_BUCKET": working_bucket,
+                }
+            },
+        )
+        _wait_lambda_ready(lam, fn_name)
+        env_now = (
+            lam.get_function_configuration(FunctionName=fn_name)
+            .get("Environment", {})
+            .get("Variables", {})
+        )
+        if env_now.get("WORKING_BUCKET") != working_bucket:
+            return {
+                "success": False,
+                "error": (
+                    f"Hook Lambda {fn_name} has WORKING_BUCKET="
+                    f"{env_now.get('WORKING_BUCKET')!r}, expected "
+                    f"{working_bucket!r}; load_hook_document would raise on the "
+                    f"compressed document reference it receives"
+                ),
+            }
         tags = lam.list_tags(Resource=hook_arn).get("Tags", {})
         if tags.get("idp:feature-id") != _HOOK_FEATURE_ID:
             return {

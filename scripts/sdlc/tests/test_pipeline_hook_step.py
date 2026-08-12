@@ -101,6 +101,10 @@ class TestHookHandlerSource:
 
     def _run(self, cbd, monkeypatch, point, document):
         monkeypatch.setenv("MARKER_KEY", cbd._HOOK_MARKER_KEY)
+        # Required: the handler refuses to run without it (see
+        # TestWorkingBucketWiring). Inline documents never touch S3, so any
+        # non-empty value is fine here.
+        monkeypatch.setenv("WORKING_BUCKET", "test-working-bucket")
         ns = {}
         exec(  # noqa: S102 — executing our own shipped source under test
             compile(cbd._HOOK_SOURCE, "index.py", "exec"), ns
@@ -321,3 +325,60 @@ class TestLambdaRuntimeAlignment:
         assert 'Runtime="python3.12"' not in src, (
             "a hardcoded runtime silently breaks when the buildspec python moves"
         )
+
+
+@pytest.mark.unit
+class TestWorkingBucketWiring:
+    """The hook cannot read the document without WORKING_BUCKET.
+
+    At `postprocessing` the dispatcher always hands over a COMPRESSED document
+    reference, and `idp_common.hooks.load_hook_document` raises outright
+    ("carries a compressed document reference but no working bucket was given")
+    unless it is set. A hook that raises still counts as `invoked`, so this would
+    have surfaced as the confusing "hook ran but recorded no documentUpdatedBy"
+    rather than as a missing-config error.
+    """
+
+    def test_hook_source_requires_working_bucket_explicitly(self, cbd):
+        assert "WORKING_BUCKET" in cbd._HOOK_SOURCE
+        assert "working_bucket=working_bucket" in cbd._HOOK_SOURCE, (
+            "pass it explicitly rather than relying on the env var lookup inside "
+            "idp_common, so a missing value fails with our own message"
+        )
+
+    def test_hook_fails_loudly_without_working_bucket(self, cbd, monkeypatch):
+        """Fail with a clear message rather than a deep idp_common traceback."""
+        monkeypatch.setenv("MARKER_KEY", cbd._HOOK_MARKER_KEY)
+        monkeypatch.delenv("WORKING_BUCKET", raising=False)
+        ns = {}
+        exec(  # noqa: S102 — our own shipped source under test
+            compile(cbd._HOOK_SOURCE, "index.py", "exec"), ns
+        )
+        with pytest.raises(RuntimeError, match="WORKING_BUCKET"):
+            ns["lambda_handler"]({"hookPoint": "postprocessing", "document": {"id": "a"}}, None)
+
+    def test_step_resolves_and_verifies_the_bucket(self, cbd):
+        import inspect
+
+        src = inspect.getsource(cbd.test_step14_pipeline_hooks)
+        assert "_resolve_working_bucket(stack_name)" in src
+        # Set unconditionally: the reuse path skips create_function's Environment.
+        assert "update_function_configuration" in src
+        assert 'env_now.get("WORKING_BUCKET") != working_bucket' in src, (
+            "verify the env var actually landed, don't assume"
+        )
+
+    def test_lambda_updates_are_serialised(self, cbd):
+        """Lambda rejects a mutating call while another is in flight, so the
+        create -> tag -> configure sequence must wait between steps."""
+        import inspect
+
+        src = inspect.getsource(cbd.test_step14_pipeline_hooks)
+        assert src.count("_wait_lambda_ready(") >= 2
+
+    def test_working_bucket_resolver_targets_the_right_resource(self, cbd):
+        import inspect
+
+        src = inspect.getsource(cbd._resolve_working_bucket)
+        assert 'LogicalResourceId") == "WorkingBucket"' in src
+        assert "AWS::S3::Bucket" in src
