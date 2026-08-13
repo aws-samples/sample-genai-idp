@@ -6,10 +6,11 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import boto3
+from botocore.exceptions import ClientError
 
 sqs = boto3.client("sqs")
 athena = boto3.client("athena")
@@ -63,32 +64,87 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 # SQL-injection defense for Athena queries
 # -----------------------------------------
 # The Athena f-string queries in this file (marked `# nosec B608`) interpolate
-# identifier-like values (test_run_id, database name) that Athena does NOT
-# support as bind parameters. To prevent SQL injection we enforce a strict
-# allow-list on every such value BEFORE it is ever placed in a query:
+# values that Athena does NOT support as bind parameters. Two distinct contexts
+# exist and they need different defenses — conflating them was the bug behind
+# issue #619:
 #
-#   - Pattern: ^[a-zA-Z0-9_\-./]+$  (identifiers, UUID fragments, S3-style paths)
-#   - No quotes (' "), no semicolons, no whitespace, no SQL metacharacters,
-#     no comment markers (--, /* */), no parentheses — nothing that can
-#     escape an identifier context or terminate a statement.
-#   - Called at the top of every resolver that builds a query; on failure
-#     raises ValueError and the query is never executed.
+# 1. IDENTIFIER context (the database name in `FROM "{database}"."table"`).
+#    Defended by a strict allow-list, `_validate_sql_input()`:
+#      - Pattern: ^[a-zA-Z0-9_\-./]+$  (identifiers, UUID fragments, S3 paths)
+#      - No quotes (' "), no whitespace, no semicolons, no parentheses, no `*`
+#        — nothing that can close the surrounding double-quoted identifier or
+#        terminate the statement. (Hyphens and dots ARE allowed, since real
+#        database names need them: `idp1-reporting-db`. That admits the `--`
+#        digraph, which is harmless here because the value only ever appears
+#        inside double quotes, where it is identifier text rather than the start
+#        of a comment.)
+#    Identifiers in this solution are infrastructure-controlled (a CloudFormation
+#    -supplied env var), so rejecting anything outside the grammar costs nothing.
 #
-# Bandit's B608 flags string-built SQL generally; it cannot see that the
-# interpolated values are constrained to this grammar. Each `# nosec B608`
-# annotation in this file is therefore justified by a preceding
-# `_validate_sql_input()` call on every interpolated value.
+# 2. STRING-LITERAL context (test_run_id in `WHERE document_id LIKE '...'`).
+#    test_run_id is derived from a *user-chosen test set name*, so it legally
+#    contains spaces, parentheses, apostrophes and the like. Applying the
+#    identifier allow-list here rejected perfectly valid runs (e.g.
+#    "ConfBench (light noise)-20260813-132501") and broke their metrics
+#    aggregation outright. The correct defense for a literal is escaping, not
+#    an allow-list: `_sql_literal()` doubles every single quote, which is the
+#    complete escape for a Trino/Presto single-quoted literal (backslash is
+#    NOT an escape character there, so doubling `'` cannot be bypassed).
+#    `_sql_like_prefix()` additionally neutralises the LIKE wildcards `%` and
+#    `_` so a name containing them matches literally rather than broadening
+#    the prefix match; its queries must pair it with `ESCAPE '\'`.
+#
+# Bandit's B608 flags string-built SQL generally; it cannot see that every
+# interpolated value goes through one of these two helpers. Each `# nosec B608`
+# annotation in this file is justified by the preceding `_validate_sql_input()`
+# / `_sql_literal()` / `_sql_like_prefix()` calls.
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-./]+$")
+
+# Escape character paired with every LIKE built by `_sql_like_prefix()`.
+_LIKE_ESCAPE = "\\"
 
 
 def _validate_sql_input(value, name):
-    """Validate that a value is safe for use in Athena SQL identifier context.
+    """Validate that a value is safe for use in Athena SQL *identifier* context.
 
-    See the module-level comment above for the rationale and threat model.
+    See the module-level comment above for the rationale and threat model. Use
+    `_sql_literal()` instead for values interpolated into a quoted string
+    literal — those may legitimately contain characters rejected here.
     """
     if not value or not _SAFE_ID_PATTERN.match(value):
         raise ValueError(f"{name} contains invalid characters: {value}")
     return value
+
+
+def _sql_literal(value, name):
+    """Escape a value for interpolation inside an Athena single-quoted literal.
+
+    Doubling `'` is the complete escape for a Trino/Presto string literal —
+    backslash is not an escape character there, so there is no way to smuggle a
+    quote past this. NUL is rejected outright since it cannot appear in a
+    literal at all.
+    """
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    if "\x00" in value:
+        raise ValueError(f"{name} contains invalid characters: {value!r}")
+    return value.replace("'", "''")
+
+
+def _sql_like_prefix(value, name):
+    """Escape a value for use as a literal prefix in a `LIKE ... ESCAPE '\\'`.
+
+    Neutralises the LIKE wildcards (`%`, `_`) as well as the escape character
+    itself, so a test set name containing them matches literally instead of
+    silently widening the prefix. The caller MUST append `ESCAPE '\\'` to the
+    LIKE, otherwise the emitted backslashes are matched as data.
+    """
+    escaped = (
+        value.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", f"{_LIKE_ESCAPE}%")
+        .replace("_", f"{_LIKE_ESCAPE}_")
+    )
+    return _sql_literal(escaped, name)
 
 
 dynamodb = boto3.resource("dynamodb")
@@ -162,12 +218,65 @@ def handler(event, context):
     raise ValueError(f"Unknown field: {field_name}")
 
 
-def _queue_cache_update(test_run_id):
+# How long one enqueued cache update suppresses further enqueues for the same
+# run. Aggregation re-reads every document's results.json from S3, so it can take
+# minutes on a large run; this window keeps concurrent readers (and repeat visits
+# to the results page) from stacking up redundant duplicate work, while still
+# letting a run whose aggregation genuinely failed retry on a later view.
+_CACHE_UPDATE_THROTTLE_SECONDS = 300
+
+
+def _claim_cache_update_slot(test_run_id, throttle_seconds):
+    """Atomically claim the right to enqueue a cache update for this run.
+
+    Returns True if the caller won the claim, False if another invocation
+    already enqueued one inside the throttle window. Implemented as a
+    conditional write on ``CacheUpdateQueuedAt`` so that concurrent Lambda
+    invocations — three of them raced during the issue #619 incident, each
+    firing its own redundant aggregation — collapse to a single enqueue.
+
+    Fails *open* (returns True) on any unexpected DynamoDB error: a broken
+    throttle must never be able to block a legitimate recompute.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(seconds=throttle_seconds)).isoformat()
+    try:
+        table = dynamodb.Table(os.environ["TRACKING_TABLE"])  # type: ignore[attr-defined]
+        table.update_item(
+            Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"},
+            UpdateExpression="SET CacheUpdateQueuedAt = :now",
+            ConditionExpression=(
+                "attribute_not_exists(CacheUpdateQueuedAt) "
+                "OR CacheUpdateQueuedAt < :cutoff"
+            ),
+            ExpressionAttributeValues={":now": now.isoformat(), ":cutoff": cutoff},
+        )
+        return True
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        logger.warning(
+            f"Cache-update throttle check failed for {test_run_id}, "
+            f"enqueueing anyway: {e}"
+        )
+        return True
+    except Exception as e:
+        logger.warning(
+            f"Cache-update throttle check failed for {test_run_id}, "
+            f"enqueueing anyway: {e}"
+        )
+        return True
+
+
+def _queue_cache_update(test_run_id, throttle_seconds=_CACHE_UPDATE_THROTTLE_SECONDS):
     """Enqueue an async metrics (re-)aggregation for a test run.
 
     Best-effort: a failure to enqueue must never fail the read that triggered
     it — the caller still serves whatever cached metrics it has, and the next
     view retries. Consumed by handle_cache_update_request in this same Lambda.
+
+    Enqueues are throttled per run (see ``_claim_cache_update_slot``); pass
+    ``throttle_seconds=0`` to force one through.
     """
     try:
         queue_url = os.environ.get("TEST_RESULT_CACHE_UPDATE_QUEUE_URL")
@@ -175,6 +284,14 @@ def _queue_cache_update(test_run_id):
             logger.warning(
                 f"TEST_RESULT_CACHE_UPDATE_QUEUE_URL not set; cannot queue "
                 f"cache update for {test_run_id}"
+            )
+            return False
+        if throttle_seconds and not _claim_cache_update_slot(
+            test_run_id, throttle_seconds
+        ):
+            logger.info(
+                f"Cache update for test run {test_run_id} already enqueued within "
+                f"the last {throttle_seconds}s; skipping duplicate"
             )
             return False
         sqs.send_message(
@@ -503,6 +620,15 @@ def get_test_results(test_run_id):
                 f"Test run {test_run_id} processing complete; "
                 "aggregate metrics not yet available (evaluation in progress)"
             )
+            # Self-heal: re-enqueue the aggregation. Nothing else will — the
+            # enqueue in get_test_run_status only fires on a status *transition*,
+            # and the stale-cache re-enqueue above only fires when testRunResult
+            # already exists. So a run that reached COMPLETE while its one
+            # aggregation attempt failed used to stay metric-less forever, which
+            # the UI renders as a permanent EVALUATING badge alongside a fully
+            # processed file count (issue #619). Throttled, so repeat visits to
+            # the results page don't stack up duplicate aggregations.
+            _queue_cache_update(test_run_id)
 
         return {
             "testRunId": test_run_id,
@@ -852,6 +978,15 @@ def get_test_run_status(test_run_id):
             "testRunResult"
         ):
             display_status = "EVALUATING"
+            # Self-heal when the status did NOT change on this call — i.e. the
+            # transition enqueue above didn't fire, because the run reached its
+            # terminal status on an earlier call whose aggregation then failed.
+            # Without this the run reports EVALUATING forever while showing every
+            # file processed and zero evaluating (issue #619). The throttle caps
+            # this at one aggregation per window even though the UI polls
+            # getTestRunStatus every 5 seconds.
+            if overall_status == stored_status:
+                _queue_cache_update(test_run_id)
 
         progress = (
             ((completed_files + total_failed_files) / files_count * 100)
@@ -875,6 +1010,41 @@ def get_test_run_status(test_run_id):
     except Exception as e:
         logger.error(f"Error getting test run status for {test_run_id}: {e}")
         return None
+
+
+def _athena_supplements(test_run_id):
+    """Fetch the Athena-only extras that supplement a successful Stickler run.
+
+    Returns ``(evaluation_metrics, cost_data)``, each degrading to its documented
+    "no data" shape if Athena is unavailable, the reporting tables haven't been
+    created yet, or the query fails for any other reason.
+
+    Deliberately swallows every exception. These two values are *additive* —
+    split-classification metrics and cost — on top of accuracy/confidence
+    metrics that Stickler has already computed successfully. Letting an Athena
+    error escape here is what caused issue #619: a run whose Stickler
+    aggregation produced perfectly good numbers ended up caching nothing at all,
+    which left the UI reporting EVALUATING forever.
+    """
+    try:
+        evaluation_metrics = _get_evaluation_metrics_from_athena(test_run_id)
+    except Exception as e:
+        logger.warning(
+            f"Athena split-classification metrics unavailable for {test_run_id}; "
+            f"continuing with Stickler metrics only: {e}"
+        )
+        evaluation_metrics = {}
+
+    try:
+        cost_data = _get_cost_data_from_athena(test_run_id)
+    except Exception as e:
+        logger.warning(
+            f"Athena cost data unavailable for {test_run_id}; "
+            f"reporting zero cost: {e}"
+        )
+        cost_data = {"total_cost": 0, "cost_breakdown": {}}
+
+    return evaluation_metrics, cost_data
 
 
 def _aggregate_test_run_metrics(test_run_id):
@@ -913,9 +1083,10 @@ def _aggregate_test_run_metrics(test_run_id):
                         f"Using Stickler aggregation for test run {test_run_id}"
                     )
 
-                    # Get split metrics from Athena
-                    athena_metrics = _get_evaluation_metrics_from_athena(test_run_id)
-                    cost_data = _get_cost_data_from_athena(test_run_id)
+                    # Get split metrics + cost from Athena. Best-effort: these
+                    # only *supplement* the Stickler numbers, so a failure here
+                    # must never discard them (issue #619).
+                    athena_metrics, cost_data = _athena_supplements(test_run_id)
 
                     # Prefer Stickler confidence over Athena (Stickler v0.4.0+ has better calibration)
                     stickler_avg_confidence = stickler_metrics.get("average_confidence")
@@ -1189,21 +1360,24 @@ def _get_evaluation_metrics_from_athena(test_run_id):
         logger.warning("ATHENA_DATABASE environment variable not set")
         return {}
 
-    _validate_sql_input(test_run_id, "test_run_id")
+    # test_run_id lands in a string-literal context, so it is escaped (it may
+    # legitimately contain spaces/parens/quotes from the test set name); the
+    # database name is an identifier and keeps the strict allow-list.
+    like_prefix = _sql_like_prefix(test_run_id, "test_run_id")
     _validate_sql_input(database, "database")
 
     # Get only split classification metrics from Athena
     # Other metrics (accuracy, precision, recall, etc.) come from Stickler aggregation
     query = f"""
-    SELECT 
+    SELECT
         SUM(CAST(total_pages AS INT)) as total_pages,
         SUM(CAST(total_splits AS INT)) as total_splits,
         SUM(CAST(correctly_classified_pages AS INT)) as correctly_classified_pages,
         SUM(CAST(correctly_split_without_order AS INT)) as correctly_split_without_order,
         SUM(CAST(correctly_split_with_order AS INT)) as correctly_split_with_order
-    FROM "{database}"."document_evaluations" 
-    WHERE document_id LIKE '{test_run_id}%'
-    """  # nosec B608 - validated by _validate_sql_input()
+    FROM "{database}"."document_evaluations"
+    WHERE document_id LIKE '{like_prefix}%' ESCAPE '{_LIKE_ESCAPE}'
+    """  # nosec B608 - escaped by _sql_like_prefix() / _validate_sql_input()
 
     results = _execute_athena_query(query, database)
 
@@ -1215,9 +1389,10 @@ def _get_evaluation_metrics_from_athena(test_run_id):
     # Get confidence data from attribute_evaluations table
     confidence_query = f"""
     SELECT AVG(CAST(confidence AS DOUBLE)) as avg_confidence
-    FROM "{database}"."attribute_evaluations" 
-    WHERE document_id LIKE '{test_run_id}%' AND confidence IS NOT NULL AND confidence != ''
-    """  # nosec B608 - validated by _validate_sql_input()
+    FROM "{database}"."attribute_evaluations"
+    WHERE document_id LIKE '{like_prefix}%' ESCAPE '{_LIKE_ESCAPE}'
+      AND confidence IS NOT NULL AND confidence != ''
+    """  # nosec B608 - escaped by _sql_like_prefix() / _validate_sql_input()
 
     confidence_results = _execute_athena_query(confidence_query, database)
     avg_confidence = (
@@ -1266,7 +1441,9 @@ def _get_cost_data_from_athena(test_run_id):
         logger.warning("ATHENA_DATABASE environment variable not set")
         return {"total_cost": 0, "cost_breakdown": {}}
 
-    _validate_sql_input(test_run_id, "test_run_id")
+    # See _get_evaluation_metrics_from_athena: literal context for test_run_id,
+    # identifier context for the database name.
+    like_prefix = _sql_like_prefix(test_run_id, "test_run_id")
     _validate_sql_input(database, "database")
 
     # Extract date from test_run_id (format: name-YYYYMMDD-HHMMSS)
@@ -1294,10 +1471,10 @@ def _get_cost_data_from_athena(test_run_id):
         AVG(CAST(unit_cost AS DOUBLE)) as unit_cost,
         SUM(CAST(estimated_cost AS DOUBLE)) as total_estimated_cost
     FROM "{database}"."metering"
-    WHERE document_id LIKE '{test_run_id}/%'
+    WHERE document_id LIKE '{like_prefix}/%' ESCAPE '{_LIKE_ESCAPE}'
     {date_filter}
     GROUP BY context, service_api, unit
-    """  # nosec B608 - validated by _validate_sql_input()
+    """  # nosec B608 - escaped by _sql_like_prefix() / _validate_sql_input()
 
     results = _execute_athena_query(query, database)
 

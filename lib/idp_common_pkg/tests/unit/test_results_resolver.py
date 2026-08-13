@@ -438,3 +438,391 @@ def test_handler_field_routing():
     event3 = {"info": {"fieldName": "unknownField"}, "arguments": {}}
     with pytest.raises(ValueError, match="Unknown field"):
         handler(event3, {})
+
+
+# ---------------------------------------------------------------------------
+# Issue #619: a test set name containing characters outside the SQL *identifier*
+# allow-list (spaces, parentheses, quotes) made the Athena helpers raise, which
+# threw away a perfectly good Stickler aggregation, cached nothing, and left the
+# run permanently reporting EVALUATING with every file processed.
+# ---------------------------------------------------------------------------
+
+# The exact name that triggered the incident on the IDP1 stack.
+_UNSAFE_RUN_ID = "ConfBench (light noise)-20260813-132501"
+
+
+@pytest.mark.unit
+def test_identifier_allow_list_still_rejects_injection():
+    """The identifier guard must stay strict — it protects the database name."""
+    for bad in ['db"; DROP TABLE x', "db; DROP TABLE x", "db name", "db'x", "db*", ""]:
+        with pytest.raises(ValueError):
+            index._validate_sql_input(bad, "database")
+
+    # Hyphens and dots are legal — real database names need them.
+    assert index._validate_sql_input("idp1-reporting-db", "database")
+
+
+@pytest.mark.unit
+def test_sql_literal_escapes_quotes():
+    """Doubling `'` is the complete escape for a Trino single-quoted literal."""
+    assert index._sql_literal("O'Brien", "test_run_id") == "O''Brien"
+    # A classic literal-context break-out becomes inert data.
+    assert index._sql_literal("x' OR '1'='1", "test_run_id") == "x'' OR ''1''=''1"
+    # Backslash is NOT an escape character in Trino literals, so it must be left
+    # alone here — doubling it would corrupt the matched value.
+    assert index._sql_literal("a\\b", "test_run_id") == "a\\b"
+    with pytest.raises(ValueError):
+        index._sql_literal("", "test_run_id")
+
+
+@pytest.mark.unit
+def test_sql_like_prefix_neutralises_wildcards():
+    """LIKE wildcards in a user-chosen name must match literally."""
+    # `_` and `%` would otherwise widen the prefix match to other runs.
+    assert index._sql_like_prefix("W2_Set", "test_run_id") == "W2\\_Set"
+    assert index._sql_like_prefix("50%-set", "test_run_id") == "50\\%-set"
+    # The escape character itself is escaped first, so it can't swallow the
+    # character that follows it.
+    assert index._sql_like_prefix("a\\_b", "test_run_id") == "a\\\\\\_b"
+    # Spaces and parentheses — the issue #619 trigger — pass through untouched.
+    assert index._sql_like_prefix(_UNSAFE_RUN_ID, "test_run_id") == _UNSAFE_RUN_ID
+
+
+@pytest.mark.unit
+def test_athena_evaluation_metrics_accepts_name_with_spaces_and_parens():
+    """The regression: a parenthesised test set name must not raise.
+
+    Before the fix `_validate_sql_input` was applied to test_run_id, which sits
+    in a string-literal context, so any run whose test set name contained a
+    space or paren failed aggregation outright.
+    """
+    captured = []
+
+    def fake_execute(query, database):
+        captured.append(query)
+        return [{}]
+
+    with (
+        patch.dict(os.environ, {"ATHENA_DATABASE": "idp1-reporting-db"}),
+        patch.object(index, "_execute_athena_query", side_effect=fake_execute),
+    ):
+        result = index._get_evaluation_metrics_from_athena(_UNSAFE_RUN_ID)
+
+    assert result == {}  # empty Athena result set, but no exception
+    assert captured, "query should have been built and executed"
+    # The name is interpolated verbatim (nothing to escape) and paired with the
+    # ESCAPE clause that _sql_like_prefix's output requires.
+    assert f"LIKE '{_UNSAFE_RUN_ID}%'" in captured[0]
+    assert "ESCAPE '\\'" in captured[0]
+
+
+@pytest.mark.unit
+def test_athena_cost_query_accepts_name_with_spaces_and_parens():
+    """Same regression for the cost/metering query."""
+    captured = []
+
+    with (
+        patch.dict(os.environ, {"ATHENA_DATABASE": "idp1-reporting-db"}),
+        patch.object(
+            index,
+            "_execute_athena_query",
+            side_effect=lambda q, d: captured.append(q) or [],
+        ),
+    ):
+        result = index._get_cost_data_from_athena(_UNSAFE_RUN_ID)
+
+    assert result == {"total_cost": 0, "cost_breakdown": {}}
+    assert f"LIKE '{_UNSAFE_RUN_ID}/%'" in captured[0]
+    # The embedded YYYYMMDD is still parsed out for partition pruning.
+    assert "date IN ('2026-08-13', '2026-08-14')" in captured[0]
+
+
+@pytest.mark.unit
+def test_stickler_metrics_survive_athena_failure():
+    """A failing Athena supplement must not discard good Stickler metrics.
+
+    This is the core of issue #619: Stickler had already computed
+    overall_accuracy=0.7232 for the run, but an exception from the *optional*
+    Athena split-metrics call propagated out of _aggregate_test_run_metrics and
+    into handle_cache_update_request's bare except, so nothing was ever cached.
+    """
+    stickler_body = {
+        "overall_accuracy": 0.7232142857142857,
+        "document_count": 10,
+        "weighted_overall_scores": {"doc1.pdf": 0.6784},
+        "average_confidence": 0.81,
+        "confusion_matrix": {"tp": 5},
+        "field_metrics": {"Name": {"accuracy": 1.0}},
+        "graded_packet_metrics": {"mean": {"final_score": 0.7}},
+    }
+    mock_payload = Mock()
+    mock_payload.read.return_value = json.dumps(
+        {"statusCode": 200, "body": json.dumps(stickler_body)}
+    )
+    mock_lambda = Mock()
+    mock_lambda.invoke.return_value = {"Payload": mock_payload}
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TEST_EXECUTION_AGGREGATION_FUNCTION_ARN": "arn:aws:lambda:::function:agg"
+            },
+        ),
+        patch.object(index, "lambda_client", mock_lambda),
+        patch.object(index, "_get_test_run_config", return_value={}),
+        patch.object(index, "_invoke_mlflow_logger"),
+        # Both Athena supplements blow up, exactly as they did on the live stack.
+        patch.object(
+            index,
+            "_get_evaluation_metrics_from_athena",
+            side_effect=ValueError("test_run_id contains invalid characters"),
+        ),
+        patch.object(
+            index,
+            "_get_cost_data_from_athena",
+            side_effect=ValueError("test_run_id contains invalid characters"),
+        ),
+    ):
+        result = index._aggregate_test_run_metrics(_UNSAFE_RUN_ID)
+
+    # The Stickler numbers survive...
+    assert result["overall_accuracy"] == 0.7232142857142857
+    assert result["document_count"] == 10
+    assert result["field_metrics"] == {"Name": {"accuracy": 1.0}}
+    assert result["average_confidence"] == 0.81
+    # ...and the Athena-only extras degrade to their documented "no data" shape
+    # rather than taking the whole aggregation down with them.
+    assert result["split_classification_metrics"] == {}
+    assert result["total_cost"] == 0
+    assert result["cost_breakdown"] == {}
+
+
+@pytest.mark.unit
+def test_missing_metrics_requeues_aggregation():
+    """get_test_results must re-enqueue when a terminal run has no metrics.
+
+    Nothing else will: the enqueue in get_test_run_status only fires on a status
+    *transition*, and the stale-cache re-enqueue only fires when testRunResult
+    already exists. Without this the run stays metric-less forever.
+    """
+    mock_table = Mock()
+    mock_table.get_item.return_value = {
+        "Item": {
+            "PK": f"testrun#{_UNSAFE_RUN_ID}",
+            "SK": "metadata",
+            "Status": "COMPLETE",
+            "FilesCount": 10,
+            "CompletedFiles": 10,
+            "FailedFiles": 0,
+            # No testRunResult -> aggregation failed on its one attempt.
+        }
+    }
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_claim_cache_update_slot", return_value=True),
+    ):
+        result = index.get_test_results(_UNSAFE_RUN_ID)
+
+    assert result["status"] == "COMPLETE"
+    mock_sqs.send_message.assert_called_once()
+    body = json.loads(mock_sqs.send_message.call_args.kwargs["MessageBody"])
+    assert body == {"testRunId": _UNSAFE_RUN_ID}
+
+
+@pytest.mark.unit
+def test_aborted_run_without_metrics_does_not_requeue():
+    """An ABORTED run is not eligible for aggregation, matching the enqueue
+    condition on the status-transition path."""
+    mock_table = Mock()
+    mock_table.get_item.return_value = {
+        "Item": {
+            "PK": "testrun#aborted-run",
+            "SK": "metadata",
+            "Status": "ABORTED",
+            "FilesCount": 10,
+            "CompletedFiles": 4,
+            "FailedFiles": 0,
+            "CompletedFilesCounted": True,
+        }
+    }
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+    ):
+        result = index.get_test_results("aborted-run")
+
+    assert result["status"] == "ABORTED"
+    mock_sqs.send_message.assert_not_called()
+
+
+def _status_table_for(test_run_id, files, stored_status, with_metrics=False):
+    """Mock tracking table where every file is fully processed and evaluated."""
+    metadata = {
+        "PK": f"testrun#{test_run_id}",
+        "SK": "metadata",
+        "Status": stored_status,
+        "Files": files,
+        "FilesCount": len(files),
+        "CompletedAt": "2026-08-13T13:27:11.869523Z",
+    }
+    if with_metrics:
+        metadata["testRunResult"] = {"overallAccuracy": 0.72}
+
+    def get_item(Key):
+        if Key["PK"] == f"testrun#{test_run_id}":
+            return {"Item": metadata}
+        return {"Item": {"ObjectStatus": "COMPLETED", "EvaluationStatus": "COMPLETED"}}
+
+    mock_table = Mock()
+    mock_table.get_item.side_effect = get_item
+    return mock_table
+
+
+@pytest.mark.unit
+def test_status_selfheals_when_already_terminal_without_metrics():
+    """The observed symptom: EVALUATING badge with 10/10 processed, 0 evaluating.
+
+    The run already reached COMPLETE on an earlier call, so the transition
+    enqueue does not fire. This call must enqueue anyway, otherwise the badge
+    never clears.
+    """
+    files = [f"doc{i}.pdf" for i in range(10)]
+    mock_table = _status_table_for(_UNSAFE_RUN_ID, files, stored_status="COMPLETE")
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_claim_cache_update_slot", return_value=True),
+    ):
+        result = index.get_test_run_status(_UNSAFE_RUN_ID)
+
+    # The reported state that looked self-contradictory to the user.
+    assert result["status"] == "EVALUATING"
+    assert result["completedFiles"] == 10
+    assert result["evaluatingFiles"] == 0
+    # ...now accompanied by a recovery attempt.
+    mock_sqs.send_message.assert_called_once()
+
+
+@pytest.mark.unit
+def test_status_does_not_requeue_once_metrics_are_cached():
+    """Convergence: once testRunResult exists, COMPLETE is reported and no
+    further aggregation is enqueued."""
+    files = [f"doc{i}.pdf" for i in range(10)]
+    mock_table = _status_table_for(
+        "good-run", files, stored_status="COMPLETE", with_metrics=True
+    )
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+    ):
+        result = index.get_test_run_status("good-run")
+
+    assert result["status"] == "COMPLETE"
+    mock_sqs.send_message.assert_not_called()
+
+
+@pytest.mark.unit
+def test_cache_update_throttle_collapses_concurrent_enqueues():
+    """Three concurrent readers raced during the incident, each firing its own
+    redundant aggregation. The conditional-write claim collapses them to one."""
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index, "sqs", mock_sqs),
+        # Loser of the race: the condition expression failed.
+        patch.object(index, "_claim_cache_update_slot", return_value=False),
+    ):
+        assert index._queue_cache_update("run-1") is False
+
+    mock_sqs.send_message.assert_not_called()
+
+    # throttle_seconds=0 bypasses the claim entirely (used for forced backfills).
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_claim_cache_update_slot", return_value=False),
+    ):
+        assert index._queue_cache_update("run-1", throttle_seconds=0) is True
+
+    mock_sqs.send_message.assert_called_once()
+
+
+@pytest.mark.unit
+def test_claim_cache_update_slot_fails_open():
+    """A broken throttle must never block a legitimate recompute."""
+    mock_table = Mock()
+    mock_table.update_item.side_effect = Exception("dynamo unavailable")
+
+    with (
+        patch.dict(os.environ, {"TRACKING_TABLE": "tracking"}),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+    ):
+        assert index._claim_cache_update_slot("run-1", 300) is True
+
+
+@pytest.mark.unit
+def test_claim_cache_update_slot_denies_on_condition_failure():
+    """A ConditionalCheckFailedException means someone else already claimed it."""
+    from botocore.exceptions import ClientError
+
+    mock_table = Mock()
+    mock_table.update_item.side_effect = ClientError(
+        {"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem"
+    )
+
+    with (
+        patch.dict(os.environ, {"TRACKING_TABLE": "tracking"}),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+    ):
+        assert index._claim_cache_update_slot("run-1", 300) is False
