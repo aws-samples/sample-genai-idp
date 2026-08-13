@@ -1547,6 +1547,52 @@ def _wait_lambda_ready(lam, fn_name, attempts=20, delay=3):
     return False
 
 
+# How long to keep looking for OUR execution after run-inference returns, and how
+# often to re-check. `--monitor` is not a dependable barrier: it aborts on any
+# internal error and still exits 0, so the step must wait on the thing it
+# actually needs (a SUCCEEDED execution pinned to our config version) rather than
+# on the CLI's say-so. The document takes ~80-120s in practice.
+_TARGET_WAIT_SECS = 600
+_TARGET_POLL_SECS = 20
+
+
+def _find_target_execution(sfn, sm_arn, config_version):
+    """(execution_arn, scanned) for the SUCCEEDED execution pinned to
+    `config_version`, or (None, scanned).
+
+    Identified by the execution INPUT's `document.config_version`, which is exact:
+    only our document is pinned to that version. Matching on hook point instead
+    would latch onto another parallel step's execution, since every execution
+    emits both hook results.
+    """
+    scanned = 0
+    next_token = None
+    while scanned < 300:
+        kwargs = {
+            "stateMachineArn": sm_arn,
+            "statusFilter": "SUCCEEDED",
+            "maxResults": 100,
+        }
+        if next_token:
+            kwargs["nextToken"] = next_token
+        page = sfn.list_executions(**kwargs)
+        for ex in page.get("executions", []):
+            scanned += 1
+            try:
+                raw = sfn.describe_execution(
+                    executionArn=ex["executionArn"]
+                ).get("input") or "{}"
+                doc_in = json.loads(raw).get("document") or {}
+            except (ValueError, TypeError, KeyError):
+                continue
+            if doc_in.get("config_version") == config_version:
+                return ex["executionArn"], scanned
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
+    return None, scanned
+
+
 def _resolve_working_bucket(stack_name):
     """Physical name of the stack's WorkingBucket.
 
@@ -1943,42 +1989,34 @@ def test_step14_pipeline_hooks(stack_name):
         #    is therefore paginated FORWARD and in full.
         sfn = boto3.client("stepfunctions", config=_THROTTLE_RETRY_CONFIG)
 
+        # Do NOT trust `--monitor` as the barrier. It aborts on any internal
+        # error and still exits 0 — a missing DocumentState enum value made it
+        # bail after 21s with "Monitoring error: 1 validation error for
+        # DocumentStatus", so the scan ran while the document was still QUEUED
+        # and reported a false "no execution found". Poll for our execution
+        # until it appears, up to a deadline.
         target_arn = None
         scanned = 0
-        next_token = None
-        while scanned < 300 and not target_arn:
-            kwargs = {
-                "stateMachineArn": sm_arn,
-                "statusFilter": "SUCCEEDED",
-                "maxResults": 100,
-            }
-            if next_token:
-                kwargs["nextToken"] = next_token
-            page = sfn.list_executions(**kwargs)
-            for ex in page.get("executions", []):
-                scanned += 1
-                try:
-                    raw = sfn.describe_execution(
-                        executionArn=ex["executionArn"]
-                    ).get("input") or "{}"
-                    doc_in = (json.loads(raw).get("document") or {})
-                except (ValueError, TypeError, KeyError):
-                    continue
-                if doc_in.get("config_version") == config_version:
-                    target_arn = ex["executionArn"]
-                    break
-            next_token = page.get("nextToken")
-            if not next_token:
+        deadline = time.time() + _TARGET_WAIT_SECS
+        while True:
+            target_arn, scanned = _find_target_execution(sfn, sm_arn, config_version)
+            if target_arn or time.time() > deadline:
                 break
+            print(
+                f"  (our execution not SUCCEEDED yet; scanned {scanned}, "
+                f"retrying in {_TARGET_POLL_SECS}s)"
+            )
+            time.sleep(_TARGET_POLL_SECS)
 
         if not target_arn:
             return {
                 "success": False,
                 "error": (
                     f"No SUCCEEDED execution found whose input pins "
-                    f"config_version={config_version!r} (scanned {scanned}). The "
-                    f"document either failed to process or was not pinned to that "
-                    f"version by run-inference --config-version."
+                    f"config_version={config_version!r} (scanned {scanned}) within "
+                    f"{_TARGET_WAIT_SECS}s. The document either failed to process "
+                    f"or was not pinned to that version by run-inference "
+                    f"--config-version."
                 ),
             }
         print(f"  ✓ found our execution ({scanned} scanned): {target_arn.rsplit(':', 1)[-1]}")

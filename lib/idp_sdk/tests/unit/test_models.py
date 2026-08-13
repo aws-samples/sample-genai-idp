@@ -43,6 +43,48 @@ class TestEnums:
         assert DocumentState.COMPLETED.value == "COMPLETED"
         assert DocumentState.FAILED.value == "FAILED"
 
+    def test_document_state_covers_every_runtime_status(self):
+        """DocumentState MUST be a superset of idp_common.models.Status.
+
+        This enum validates the ObjectStatus read straight out of the tracking
+        table, so a missing value makes `idp-cli status` /
+        `run-inference --monitor` die with a pydantic ValidationError instead of
+        reporting progress. Four were missing, two on entirely ordinary paths:
+        PREPROCESSING (set for EVERY document whenever a preprocessing hook is
+        registered — so every PII Anonymization user) and
+        RULE_VALIDATION_POLICY_CLASSIFICATION (every rule-validation document).
+
+        Asserted as a set relationship rather than a fixed list so a status added
+        to the runtime in future fails HERE, offline, instead of in a user's CLI.
+        """
+        idp_common_models = pytest.importorskip("idp_common.models")
+
+        runtime = {s.value for s in idp_common_models.Status}
+        sdk = {s.value for s in DocumentState}
+        missing = runtime - sdk
+        assert not missing, (
+            f"DocumentState is missing runtime status values {sorted(missing)}; "
+            f"idp-cli would raise a ValidationError for a document in that state"
+        )
+
+    @pytest.mark.parametrize(
+        "status_value",
+        [
+            "PREPROCESSING",
+            "RULE_VALIDATION_POLICY_CLASSIFICATION",
+            "REDACTED_SUPERSEDED",
+            "PENDING_UPLOAD",
+        ],
+    )
+    def test_document_status_accepts_the_previously_missing_states(self, status_value):
+        """Regression: each of these raised
+        `1 validation error for DocumentStatus` and aborted monitoring."""
+        from idp_sdk.models.document import DocumentStatus
+
+        assert DocumentStatus(
+            document_id="x.pdf", status=status_value
+        ).status.value == (status_value)
+
 
 @pytest.mark.unit
 class TestBatchModels:
