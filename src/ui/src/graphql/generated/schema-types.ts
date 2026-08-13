@@ -1717,6 +1717,7 @@ export type ReviewEffortEstimate = {
   docsToReviewHigh: Scalars['Int']['output'];
   docsToReviewLow: Scalars['Int']['output'];
   effortMinutes: Scalars['Float']['output'];
+  effortMinutesPerDoc?: Maybe<Scalars['Float']['output']>;
   estimateConfidence: Scalars['String']['output'];
   impliedCutoff?: Maybe<Scalars['Float']['output']>;
   qualityTier?: Maybe<Scalars['String']['output']>;

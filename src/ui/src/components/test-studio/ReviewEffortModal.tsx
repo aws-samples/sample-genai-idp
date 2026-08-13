@@ -77,6 +77,7 @@ export interface ReviewEffortEstimate {
   residualError: number;
   baselineError: number;
   effortMinutes: number;
+  effortMinutesPerDoc?: number | null;
   estimateConfidence: string;
   auditSampleSize: number;
   recommendReviewAll: boolean;
@@ -101,6 +102,18 @@ const formatEffort = (minutes: number): string => {
   if (minutes < 60) return `≈${Math.round(minutes)} min`;
   return `≈${(minutes / 60).toFixed(minutes < 600 ? 1 : 0)} hrs`;
 };
+
+/**
+ * Cost of reviewing every document.
+ *
+ * Uses the backend's per-document figure when present. The fallback divides
+ * effortMinutes by docsToReview, which overstates it — effortMinutes also covers
+ * the audit sample, and reviewing everything leaves nothing to audit.
+ */
+const effortForAll = (e: ReviewEffortEstimate): number =>
+  e.effortMinutesPerDoc != null && e.effortMinutesPerDoc > 0
+    ? e.effortMinutesPerDoc * e.totalDocs
+    : (e.effortMinutes / Math.max(e.docsToReview + e.auditSampleSize, 1)) * e.totalDocs;
 
 const pct = (fraction?: number | null): string =>
   fraction === null || fraction === undefined || !Number.isFinite(fraction) ? '—' : `${(fraction * 100).toFixed(1)}%`;
@@ -264,7 +277,7 @@ const ReviewEffortModal = ({ visible, testSetId, configVersion, onDismiss, onCon
                   value: 'everything',
                   label: 'Review everything',
                   description: estimate
-                    ? `All ${estimate.totalDocs} documents get human eyes (${formatEffort((estimate.effortMinutes / Math.max(estimate.docsToReview, 1)) * estimate.totalDocs)}). Highest confidence in the result; most effort.`
+                    ? `All ${estimate.totalDocs} documents get human eyes (${formatEffort(effortForAll(estimate))}). Highest confidence in the result; most effort.`
                     : 'Every document gets human eyes. Highest confidence in the result; most effort.',
                 },
                 {
@@ -291,13 +304,7 @@ const ReviewEffortModal = ({ visible, testSetId, configVersion, onDismiss, onCon
               </div>
               <div>
                 <Box variant="awsui-key-label">Est. effort</Box>
-                <Box fontSize="heading-l">
-                  {formatEffort(
-                    strategy === 'everything'
-                      ? (estimate.effortMinutes / Math.max(estimate.docsToReview, 1)) * estimate.totalDocs
-                      : estimate.effortMinutes,
-                  )}
-                </Box>
+                <Box fontSize="heading-l">{formatEffort(strategy === 'everything' ? effortForAll(estimate) : estimate.effortMinutes)}</Box>
               </div>
               <div>
                 <Box variant="awsui-key-label">Est. accuracy after</Box>

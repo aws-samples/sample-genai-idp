@@ -318,6 +318,7 @@ export const estimateReviewEffort = /* GraphQL */ `
       residualError
       baselineError
       effortMinutes
+      effortMinutesPerDoc
       estimateConfidence
       auditSampleSize
       recommendReviewAll

@@ -1370,9 +1370,13 @@ def estimate_review_effort(args):
     curve = store.get_curve(test_set_id, config_version)
     prior = store.get_global_prior()
 
-    doc_confidences, fields_per_doc, pages_per_doc, ground_truth_docs = (
-        _collect_doc_confidences(test_set_id)
-    )
+    (
+        doc_confidences,
+        fields_per_doc,
+        pages_per_doc,
+        ground_truth_docs,
+        alerts_per_doc,
+    ) = _collect_doc_confidences(test_set_id)
 
     # The set's real size, which may exceed the sample. Using the sample size as the
     # total understates the work, the effort and the audit pool by however far the
@@ -1401,6 +1405,7 @@ def estimate_review_effort(args):
         prior=prior,
         fields_per_doc=fields_per_doc,
         pages_per_doc=pages_per_doc,
+        alerts_per_doc=alerts_per_doc,
     )
 
     result = estimate.to_dict()
@@ -1444,7 +1449,8 @@ def _collect_doc_confidences(test_set_id):
     documents exactly as the reviewer will see them; an estimate over a different
     ordering would not describe the work the user is about to do.
 
-    Returns ``(confidences, fields_per_doc, pages_per_doc, ground_truth_docs)``. The
+    Returns ``(confidences, fields_per_doc, pages_per_doc, ground_truth_docs,
+    alerts_per_doc)``. The
     two shape figures fall back to the module defaults when the baseline carries
     nothing to measure. ``ground_truth_docs`` counts inspected documents that already
     have ground truth and are therefore absent from ``confidences``.
@@ -1478,6 +1484,7 @@ def _collect_doc_confidences(test_set_id):
             break
 
     confidences = []
+    alert_counts = []
     ground_truth_docs = 0
     for doc in documents:
         if doc.get("minConfidence") is not None or doc.get("labelSource") in (
@@ -1485,8 +1492,15 @@ def _collect_doc_confidences(test_set_id):
             LABEL_SOURCE_DRAFT,
         ):
             confidences.append(doc.get("minConfidence"))
+            if doc.get("alertCount") is not None:
+                alert_counts.append(int(doc["alertCount"]))
         else:
             ground_truth_docs += 1
+
+    # Mean alerts per reviewable document — what the effort model charges for,
+    # rather than every field in the document. None when no document carries
+    # assessment data, so the model falls back to its assumed rate.
+    alerts_per_doc = sum(alert_counts) / len(alert_counts) if alert_counts else None
 
     # Effort model input: the number of fields a reviewer has to check drives review
     # time far more than a global average does, so measure it where possible.
@@ -1526,7 +1540,13 @@ def _collect_doc_confidences(test_set_id):
         if section_counts
         else DEFAULT_PAGES_PER_DOC
     )
-    return confidences, fields_per_doc, max(1.0, pages_per_doc), ground_truth_docs
+    return (
+        confidences,
+        fields_per_doc,
+        max(1.0, pages_per_doc),
+        ground_truth_docs,
+        alerts_per_doc,
+    )
 
 
 def _count_baseline_fields(bucket, key):
@@ -1990,8 +2010,7 @@ def reset_test_set_labels(args):
     db_client.update_item(
         key={"PK": f"testset#{test_set_id}", "SK": "metadata"},
         update_expression=(
-            "SET labelState = :u, lastAddResult = :r "
-            "REMOVE labelJobId, labelJobStatus"
+            "SET labelState = :u, lastAddResult = :r REMOVE labelJobId, labelJobStatus"
         ),
         expression_attribute_values={":u": "unlabeled", ":r": now},
     )

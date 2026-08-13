@@ -1717,6 +1717,7 @@ export type ReviewEffortEstimate = {
   docsToReviewHigh: Scalars['Int']['output'];
   docsToReviewLow: Scalars['Int']['output'];
   effortMinutes: Scalars['Float']['output'];
+  effortMinutesPerDoc?: Maybe<Scalars['Float']['output']>;
   estimateConfidence: Scalars['String']['output'];
   impliedCutoff?: Maybe<Scalars['Float']['output']>;
   qualityTier?: Maybe<Scalars['String']['output']>;
@@ -2567,7 +2568,7 @@ export type EstimateReviewEffortQueryVariables = Exact<{
 }>;
 
 
-export type EstimateReviewEffortQuery = { estimateReviewEffort?: { testSetId: string, qualityTier?: string | null, qualityTierReason?: string | null, targetAccuracy: number, configVersion?: string | null, docsToReview: number, docsToReviewLow: number, docsToReviewHigh: number, totalDocs: number, sampledDocs?: number | null, impliedCutoff?: number | null, residualError: number, baselineError: number, effortMinutes: number, estimateConfidence: string, auditSampleSize: number, recommendReviewAll: boolean, calibration: { ece?: number | null, auroc?: number | null, binCoverage: number, totalObservations: number, degenerate: boolean, overconfident: boolean, undiscriminating: boolean, reliable: boolean }, burndown: Array<{ docsReviewed: number, residualErrorPct: number, cutoff?: number | null }>, reliabilityTable: Array<{ binStart: number, binEnd: number, observations: number, observedAccuracy?: number | null, blendedAccuracy?: number | null }> } | null };
+export type EstimateReviewEffortQuery = { estimateReviewEffort?: { testSetId: string, qualityTier?: string | null, qualityTierReason?: string | null, targetAccuracy: number, configVersion?: string | null, docsToReview: number, docsToReviewLow: number, docsToReviewHigh: number, totalDocs: number, sampledDocs?: number | null, impliedCutoff?: number | null, residualError: number, baselineError: number, effortMinutes: number, effortMinutesPerDoc?: number | null, estimateConfidence: string, auditSampleSize: number, recommendReviewAll: boolean, calibration: { ece?: number | null, auroc?: number | null, binCoverage: number, totalObservations: number, degenerate: boolean, overconfident: boolean, undiscriminating: boolean, reliable: boolean }, burndown: Array<{ docsReviewed: number, residualErrorPct: number, cutoff?: number | null }>, reliabilityTable: Array<{ binStart: number, binEnd: number, observations: number, observedAccuracy?: number | null, blendedAccuracy?: number | null }> } | null };
 
 export type GetAgentJobStatusQueryVariables = Exact<{
   jobId: Scalars['ID']['input'];

@@ -126,10 +126,22 @@ MIN_OBSERVATIONS_FOR_AUROC = 100
 # Default effort model: a flat heuristic that ignores field complexity, document
 # variance and annotator speed. Replace with real per-annotator timings once
 # claim→complete durations are recorded.
-DEFAULT_SECONDS_PER_FIELD = 14.0
+# Effort model. Review cost is driven by the fields a reviewer actually opens —
+# the ones flagged below their confidence threshold — not by every field in the
+# document. Charging per field made a 244-field bank statement cost ~58 minutes to
+# review, and made effort independent of how many fields were actually suspect, so
+# "review the worst documents first" appeared to save almost no time over reviewing
+# everything.
+DEFAULT_SECONDS_PER_ALERT = 14.0
 DEFAULT_SECONDS_PER_PAGE = 20.0
+DEFAULT_SECONDS_PER_DOC = 30.0
 DEFAULT_FIELDS_PER_DOC = 12.0
 DEFAULT_PAGES_PER_DOC = 2.4
+
+# Assumed share of fields below threshold when a set carries no assessment data to
+# count alerts from. Roughly the observed field-level error rate on drafted labels;
+# only a fallback, since real alert counts are available once a set is labeled.
+DEFAULT_ALERT_RATE = 0.15
 
 # Upper bound on the high-confidence audit sample. See _audit_sample_size for the
 # detection-power reasoning behind 30.
@@ -540,6 +552,7 @@ class ReviewEstimate:
     residual_error: float
     baseline_error: float
     effort_minutes: float
+    effort_minutes_per_doc: float
     estimate_confidence: EstimateConfidence
     audit_sample_size: int
     calibration: CalibrationHealth
@@ -566,6 +579,7 @@ class ReviewEstimate:
             "residualError": self.residual_error,
             "baselineError": self.baseline_error,
             "effortMinutes": self.effort_minutes,
+            "effortMinutesPerDoc": self.effort_minutes_per_doc,
             "estimateConfidence": self.estimate_confidence.value,
             "auditSampleSize": self.audit_sample_size,
             "recommendReviewAll": self.recommend_review_all,
@@ -605,8 +619,10 @@ def estimate_for_target(
     prior: Optional[ConfidenceCurve] = None,
     fields_per_doc: float = DEFAULT_FIELDS_PER_DOC,
     pages_per_doc: float = DEFAULT_PAGES_PER_DOC,
-    seconds_per_field: float = DEFAULT_SECONDS_PER_FIELD,
+    alerts_per_doc: float | None = None,
+    seconds_per_alert: float = DEFAULT_SECONDS_PER_ALERT,
     seconds_per_page: float = DEFAULT_SECONDS_PER_PAGE,
+    seconds_per_doc: float = DEFAULT_SECONDS_PER_DOC,
 ) -> ReviewEstimate:
     """How many documents must be reviewed to reach ``target_accuracy``?
 
@@ -633,6 +649,7 @@ def estimate_for_target(
             residual_error=0.0,
             baseline_error=0.0,
             effort_minutes=0.0,
+            effort_minutes_per_doc=0.0,
             estimate_confidence=curve.assess_estimate_confidence(),
             audit_sample_size=0,
             calibration=curve.calibration_health(),
@@ -714,15 +731,21 @@ def estimate_for_target(
         else round(confidences[docs_to_review - 1], 4)
     )
 
-    seconds = docs_to_review * (
-        fields_per_doc * seconds_per_field + pages_per_doc * seconds_per_page
+    # Per document: open and orient, check each flagged field, skim the pages to
+    # confirm nothing unflagged is wrong. A document with no alerts still costs the
+    # overhead and the skim — that is the "labels are correct, mark reviewed" path.
+    alerts = (
+        fields_per_doc * DEFAULT_ALERT_RATE
+        if alerts_per_doc is None
+        else alerts_per_doc
+    )
+    seconds_per_document = (
+        seconds_per_doc + alerts * seconds_per_alert + pages_per_doc * seconds_per_page
     )
     auto_accepted = total_docs - docs_to_review
     audit = _audit_sample_size(docs_to_review, auto_accepted)
     # The audit sample is real review work, so its cost belongs in the estimate.
-    seconds += audit * (
-        fields_per_doc * seconds_per_field + pages_per_doc * seconds_per_page
-    )
+    seconds = (docs_to_review + audit) * seconds_per_document
 
     estimate_confidence = curve.assess_estimate_confidence()
     calibration = curve.calibration_health()
@@ -752,6 +775,9 @@ def estimate_for_target(
         residual_error=residual_by_n[min(docs_to_review, len(residual_by_n) - 1)],
         baseline_error=baseline_error,
         effort_minutes=seconds / 60.0,
+        # Exposed so a caller can price a different review depth without having to
+        # divide out the audit sample that effort_minutes already includes.
+        effort_minutes_per_doc=seconds_per_document / 60.0,
         estimate_confidence=estimate_confidence,
         audit_sample_size=audit,
         calibration=calibration,

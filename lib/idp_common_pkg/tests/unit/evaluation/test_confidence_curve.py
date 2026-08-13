@@ -369,7 +369,10 @@ class TestEstimateForTarget:
         docs = _doc_confidences(120)
         estimate = estimate_for_target(curve, 95.0, 120, docs)
         per_doc_seconds = (
-            cc.DEFAULT_FIELDS_PER_DOC * cc.DEFAULT_SECONDS_PER_FIELD
+            cc.DEFAULT_SECONDS_PER_DOC
+            + cc.DEFAULT_FIELDS_PER_DOC
+            * cc.DEFAULT_ALERT_RATE
+            * cc.DEFAULT_SECONDS_PER_ALERT
             + cc.DEFAULT_PAGES_PER_DOC * cc.DEFAULT_SECONDS_PER_PAGE
         )
         expected = (
@@ -379,6 +382,38 @@ class TestEstimateForTarget:
         )
         assert estimate.effort_minutes == pytest.approx(expected)
         assert estimate.audit_sample_size > 0
+
+    def test_effort_scales_with_alerts_not_total_fields(self):
+        """Regression: effort was charged per field, so a wide document with almost
+        nothing flagged cost as much to review as one full of suspect values.
+
+        A 200-field document with 3 alerts is a few checks plus a skim, not 200
+        verifications. Charging per field made it ~47 minutes and made effort
+        independent of how much was actually wrong.
+        """
+        curve = _calibrated_curve()
+        docs = _doc_confidences(40)
+
+        wide_but_clean = estimate_for_target(
+            curve, 95.0, 40, docs, fields_per_doc=200.0, alerts_per_doc=3.0
+        )
+        narrow_but_messy = estimate_for_target(
+            curve, 95.0, 40, docs, fields_per_doc=12.0, alerts_per_doc=10.0
+        )
+
+        per_reviewed = wide_but_clean.effort_minutes / max(
+            wide_but_clean.docs_to_review + wide_but_clean.audit_sample_size, 1
+        )
+        assert per_reviewed < 5.0, f"{per_reviewed:.1f} min for 3 flagged fields"
+        # Alerts drive the cost, so more flags outweighs more fields.
+        assert narrow_but_messy.effort_minutes > wide_but_clean.effort_minutes
+
+    def test_a_document_with_no_alerts_still_costs_something(self):
+        """Confirming labels unchanged is real work: open, skim, mark reviewed."""
+        curve = _calibrated_curve()
+        docs = _doc_confidences(20)
+        estimate = estimate_for_target(curve, 95.0, 20, docs, alerts_per_doc=0.0)
+        assert estimate.effort_minutes > 0.0
 
     def test_prior_driven_estimate_returns_a_wide_range(self):
         """Cold start must not imply precision it doesn't have."""

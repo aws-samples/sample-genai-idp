@@ -864,6 +864,9 @@ type ReviewEffortEstimate @aws_cognito_user_pools @aws_iam {
   residualError: Float!
   baselineError: Float!
   effortMinutes: Float!
+  # Cost of reviewing one document, so a caller can price a different review
+  # depth without dividing the audit sample out of effortMinutes.
+  effortMinutesPerDoc: Float
   # prior | partially-measured | measured | unreliable
   estimateConfidence: String!
   # Random sample of the high-confidence zone to spot-check. Worst-first review
