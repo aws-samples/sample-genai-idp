@@ -218,12 +218,82 @@ def handler(event, context):
     raise ValueError(f"Unknown field: {field_name}")
 
 
+# Statuses that mean "processing is over" AND that aggregate metrics are
+# expected for. ABORTED is terminal too but is deliberately absent: an aborted
+# run is not eligible for aggregation, so it must keep reporting ABORTED rather
+# than being masked as EVALUATING.
+_METRICS_ELIGIBLE_STATUSES = ("COMPLETE", "PARTIAL_COMPLETE")
+
+
+def _awaiting_metrics(item, status):
+    """Is this run finished but still missing its cached aggregate metrics?
+
+    The single definition of the condition behind the ``EVALUATING`` badge. Three
+    resolvers surface that badge — ``_build_test_run_list`` (the Executions
+    list), ``get_test_run_status`` (the per-row poll) and ``get_test_results``
+    (the results page) — and they previously each spelled the rule out inline.
+    Issue #619 was diagnosed through the resulting confusion: the badge said
+    EVALUATING while the file counts said every document was processed and none
+    was evaluating, because "terminal but no metrics" and "actually evaluating"
+    render identically. Keep the rule here so the three sites cannot drift.
+    """
+    return status in _METRICS_ELIGIBLE_STATUSES and not item.get("testRunResult")
+
+
+def _display_status(item, status):
+    """Map a true run status to the status reported to the UI.
+
+    A finished run with no cached metrics reports ``EVALUATING``, because the
+    aggregation genuinely is still outstanding — but note the caller is
+    responsible for making sure something will actually *do* that aggregation.
+    ``get_test_run_status`` and ``get_test_results`` pair this with
+    ``_queue_cache_update``; ``_build_test_run_list`` deliberately does not (see
+    its own comment), since it renders many runs at once.
+    """
+    return "EVALUATING" if _awaiting_metrics(item, status) else status
+
+
 # How long one enqueued cache update suppresses further enqueues for the same
 # run. Aggregation re-reads every document's results.json from S3, so it can take
 # minutes on a large run; this window keeps concurrent readers (and repeat visits
 # to the results page) from stacking up redundant duplicate work, while still
 # letting a run whose aggregation genuinely failed retry on a later view.
 _CACHE_UPDATE_THROTTLE_SECONDS = 300
+
+
+def _cache_update_recently_queued(
+    item, throttle_seconds=_CACHE_UPDATE_THROTTLE_SECONDS
+):
+    """Cheap in-memory read of the throttle window from an already-fetched item.
+
+    ``_claim_cache_update_slot`` remains the authoritative guard — only its
+    conditional write is atomic against concurrent invocations. This is purely an
+    optimisation for the common case: ``get_test_run_status`` is polled every 5
+    seconds per in-progress run by the UI, and for a run that is stuck awaiting
+    metrics every one of those polls would otherwise issue a conditional
+    ``update_item`` that is almost always rejected — and a rejected conditional
+    write still consumes write capacity. Callers that already hold the metadata
+    item can skip that write entirely.
+
+    Returns False whenever the answer is not clearly "yes" (no timestamp,
+    unparseable timestamp), so an unreadable value degrades to attempting the
+    authoritative claim rather than silently suppressing recovery.
+    """
+    queued_at = item.get("CacheUpdateQueuedAt")
+    if not queued_at or not throttle_seconds:
+        return False
+    try:
+        parsed = datetime.fromisoformat(queued_at)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"Unparseable CacheUpdateQueuedAt {queued_at!r}; "
+            "falling through to the conditional claim"
+        )
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - parsed).total_seconds()
+    return 0 <= age < throttle_seconds
 
 
 def _claim_cache_update_slot(test_run_id, throttle_seconds):
@@ -545,7 +615,10 @@ def get_test_results(test_run_id):
             # document's results.json from S3 and can take minutes on a large
             # run — far longer than the API's read timeout — so doing it
             # inline here would turn a stale cache into a timed-out query.
-            _queue_cache_update(test_run_id)
+            # Skip when one is already in flight, using the metadata in hand so
+            # revisiting the page doesn't cost a rejected conditional write.
+            if not _cache_update_recently_queued(metadata):
+                _queue_cache_update(test_run_id)
 
         # For ABORTED status, count completed files on first call and persist to DB
         completed_files_count = metadata.get("CompletedFiles", 0)
@@ -627,8 +700,10 @@ def get_test_results(test_run_id):
             # aggregation attempt failed used to stay metric-less forever, which
             # the UI renders as a permanent EVALUATING badge alongside a fully
             # processed file count (issue #619). Throttled, so repeat visits to
-            # the results page don't stack up duplicate aggregations.
-            _queue_cache_update(test_run_id)
+            # the results page don't stack up duplicate aggregations — checked
+            # against the metadata already in hand to avoid a write per visit.
+            if not _cache_update_recently_queued(metadata):
+                _queue_cache_update(test_run_id)
 
         return {
             "testRunId": test_run_id,
@@ -726,12 +801,15 @@ def _build_test_run_list(items):
     test_runs = []
 
     for item in items:
-        display_status = item.get("Status")
-        # Show EVALUATING for completed tests without metrics, but keep ABORTED as-is
-        if display_status in ["COMPLETE", "PARTIAL_COMPLETE"] and not item.get(
-            "testRunResult"
-        ):
-            display_status = "EVALUATING"
+        # Show EVALUATING for completed tests without metrics, but keep ABORTED
+        # as-is. Display only: unlike the two single-run resolvers, this does NOT
+        # enqueue the missing aggregation, because one list render covers an
+        # arbitrary number of runs and fanning out an enqueue per stuck row would
+        # turn a page load into a burst of multi-minute Lambda invocations. The
+        # per-row poll (getTestRunStatus) drives recovery instead, and the UI
+        # renders TestRunnerStatus for every row — so a run visible here is
+        # already being healed by the resolver that can afford to do it.
+        display_status = _display_status(item, item.get("Status"))
 
         test_runs.append(
             {
@@ -962,9 +1040,7 @@ def get_test_run_status(test_run_id):
                 )
 
                 # Queue metric calculation for completed test runs
-                if overall_status in ["COMPLETE", "PARTIAL_COMPLETE"] and not item.get(
-                    "testRunResult"
-                ):
+                if _awaiting_metrics(item, overall_status):
                     _queue_cache_update(test_run_id)
 
             except Exception as e:
@@ -973,19 +1049,23 @@ def get_test_run_status(test_run_id):
                 )
 
         # Report EVALUATING to caller until cached metrics are available
-        display_status = overall_status
-        if display_status in ["COMPLETE", "PARTIAL_COMPLETE"] and not item.get(
-            "testRunResult"
-        ):
-            display_status = "EVALUATING"
+        display_status = _display_status(item, overall_status)
+        if _awaiting_metrics(item, overall_status):
             # Self-heal when the status did NOT change on this call — i.e. the
             # transition enqueue above didn't fire, because the run reached its
             # terminal status on an earlier call whose aggregation then failed.
             # Without this the run reports EVALUATING forever while showing every
-            # file processed and zero evaluating (issue #619). The throttle caps
-            # this at one aggregation per window even though the UI polls
-            # getTestRunStatus every 5 seconds.
-            if overall_status == stored_status:
+            # file processed and zero evaluating (issue #619).
+            #
+            # The UI polls this resolver every 5 seconds per in-progress run, so
+            # the throttle window is read from the item already in hand rather
+            # than by attempting the conditional write on every poll — the write
+            # would be rejected almost every time, and a rejected conditional
+            # write still costs write capacity. _queue_cache_update re-checks
+            # atomically, so this shortcut can only skip work, never duplicate it.
+            if overall_status == stored_status and not _cache_update_recently_queued(
+                item
+            ):
                 _queue_cache_update(test_run_id)
 
         progress = (
