@@ -286,9 +286,10 @@ class TestStepInvocationCorrectness:
 
     def test_target_is_resolved_before_history_is_read(self, cbd):
         """Ordering matters: resolving the target first is what makes the
-        collected payloads unambiguously ours."""
+        collected payloads unambiguously ours. (The matching itself now lives in
+        _find_target_execution — see TestExecutionWaitBarrier.)"""
         src = self._src(cbd)
-        resolve_at = src.index('doc_in.get("config_version") == config_version')
+        resolve_at = src.index("_find_target_execution(sfn")
         # Match the CALL, not the explanatory comment that names the old
         # reverseOrder form above it.
         history_at = src.index("sfn.get_execution_history(**hkw)")
@@ -466,3 +467,43 @@ class TestHookZipDependencyClosure:
         with zipfile.ZipFile(path) as zf:
             names = zf.namelist()
         assert not any(n.startswith("botocore/") for n in names)
+
+
+@pytest.mark.unit
+class TestExecutionWaitBarrier:
+    """`--monitor` is not a dependable barrier.
+
+    In the pipeline it aborted after 21s with "Monitoring error: 1 validation
+    error for DocumentStatus" (a runtime status missing from the SDK's
+    DocumentState enum) and still exited 0, so the step scanned for the execution
+    while the document was still QUEUED and reported a false
+    "No SUCCEEDED execution found". The step must wait on the thing it needs, not
+    on the CLI's exit code.
+    """
+
+    def test_step_polls_for_its_execution_with_a_deadline(self, cbd):
+        import inspect
+
+        src = inspect.getsource(cbd.test_step14_pipeline_hooks)
+        assert "_TARGET_WAIT_SECS" in src
+        assert "_find_target_execution(sfn" in src
+        assert "time.sleep(_TARGET_POLL_SECS)" in src
+
+    def test_wait_budget_exceeds_typical_processing_time(self, cbd):
+        """The document takes ~80-120s; the budget must leave real headroom."""
+        assert cbd._TARGET_WAIT_SECS >= 300
+        assert 5 <= cbd._TARGET_POLL_SECS <= 60
+
+    def test_finder_matches_on_the_input_config_version(self, cbd):
+        import inspect
+
+        src = inspect.getsource(cbd._find_target_execution)
+        assert 'doc_in.get("config_version") == config_version' in src
+        assert "describe_execution" in src
+
+    def test_finder_returns_scanned_count_for_diagnostics(self, cbd):
+        """The count is what made the previous failure diagnosable."""
+        import inspect
+
+        src = inspect.getsource(cbd._find_target_execution)
+        assert "return None, scanned" in src

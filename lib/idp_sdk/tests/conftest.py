@@ -6,10 +6,20 @@ Pytest configuration and shared fixtures.
 """
 
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
 from idp_sdk import IDPClient
+
+# Make the in-repo idp_common importable so the DocumentState-superset test can
+# compare against the runtime's real Status enum. Without this it silently
+# skips via importorskip — and a skipped test protects nothing, which is how
+# four runtime statuses came to be missing from DocumentState.
+_IDP_COMMON = Path(__file__).resolve().parents[2] / "idp_common_pkg"
+if _IDP_COMMON.is_dir() and str(_IDP_COMMON) not in sys.path:
+    sys.path.append(str(_IDP_COMMON))
 
 
 @pytest.fixture(scope="session")
