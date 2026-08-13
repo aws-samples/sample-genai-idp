@@ -538,7 +538,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [jsonContent, setJsonContent] = useState('');
   const [yamlContent, setYamlContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
   const [validationErrors, setValidationErrors] = useState<{ message: string; path?: string }[]>([]);
@@ -603,14 +602,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
     return formChanged || descriptionChanged;
   }, [formValues, mergedConfig, versionDescription, currentVersion?.description]);
-
-  // A new edit makes the "saved successfully" confirmation stale: the unsaved-changes
-  // banner takes over from here, and showing both at once is confusing. Called from the
-  // edit handlers rather than derived from hasUnsavedChanges, which flips true briefly
-  // while formValues re-syncs from the freshly saved mergedConfig.
-  const dismissSaveSuccess = useCallback(() => {
-    setSaveSuccess(false);
-  }, []);
 
   // Warn user before leaving page with unsaved changes
   // Both beforeunload (browser close/refresh) and hashchange (SPA navigation)
@@ -1111,7 +1102,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handle changes in the JSON editor
   const handleJsonEditorChange = (value: string | undefined): void => {
-    dismissSaveSuccess();
     setJsonContent(value ?? '');
     try {
       const parsedValue = JSON.parse(value ?? '');
@@ -1133,7 +1123,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Handle changes in the YAML editor
   const handleYamlEditorChange = (value: string | undefined): void => {
-    dismissSaveSuccess();
     setYamlContent(value ?? '');
     try {
       const parsedValue = yaml.load(value ?? '') as Record<string, unknown>;
@@ -1191,7 +1180,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
     }
 
     setIsSaving(true);
-    setSaveSuccess(false);
     setSaveError(null);
 
     try {
@@ -1508,8 +1496,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
         const descriptionChanged = versionDescription !== (currentVersion?.description || '');
         if (Object.keys(builtObject).length === 0 && !descriptionChanged) {
           console.log('No changes detected, skipping save');
-          setSaveSuccess(true);
-          setTimeout(() => setSaveSuccess(false), 3000);
+          setSuccessMessage('No changes to save.');
           return;
         }
 
@@ -1527,7 +1514,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
       const success = await updateConfiguration(currentVersionName, configToSave, versionDescription);
 
       if (success) {
-        setSaveSuccess(true);
         setSuccessMessage(saveAsDefault ? 'Configuration saved as new default.' : 'Configuration saved successfully.');
         if (saveAsDefault) {
           setShowSaveAsDefaultModal(false);
@@ -1556,7 +1542,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
     }
 
     setIsSaving(true);
-    setSaveSuccess(false);
     setSaveError(null);
 
     try {
@@ -1566,7 +1551,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
       const result = await saveAsNewVersion(builtObject, saveAsVersionName, saveAsVersionDescription);
 
       if (result.success) {
-        setSaveSuccess(true);
         setSuccessMessage(`Saved as new version "${saveAsVersionName}".`);
         setShowSaveAsVersionModal(false);
         setSaveAsVersionName('');
@@ -1588,7 +1572,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
   };
 
   const handleFormChange = (newValues: Record<string, unknown>): void => {
-    dismissSaveSuccess();
     setFormValues(newValues);
     try {
       // Update both JSON and YAML content
@@ -1628,7 +1611,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   const handleResetAllToDefault = async () => {
     setIsSaving(true);
-    setSaveSuccess(false);
     setSaveError(null);
 
     try {
@@ -1637,7 +1619,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
       const success = await updateConfiguration(currentVersionName, { resetToDefault: true });
 
       if (success) {
-        setSaveSuccess(true);
         setSuccessMessage('Configuration reset to default.');
         setShowResetModal(false);
         // Refresh to show the restored default configuration
@@ -2502,12 +2483,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
             </Alert>
           )}
 
-          {saveSuccess && (
-            <Alert type="success" dismissible onDismiss={() => setSaveSuccess(false)} header="Configuration saved successfully">
-              Your configuration changes have been saved.
-            </Alert>
-          )}
-
           {importSuccess && (
             <Alert type="success" dismissible onDismiss={() => setImportSuccess(false)} header="Configuration imported successfully">
               The configuration has been imported from the library and loaded into the editor.
@@ -2668,14 +2643,10 @@ const ConfigurationLayout = (): React.JSX.Element => {
                   onTabChange={setConfigBuilderActiveTab}
                   showRuleSchema={showRuleSchema}
                   versionDescription={versionDescription}
-                  onDescriptionChange={(description: string) => {
-                    dismissSaveSuccess();
-                    setVersionDescription(description);
-                  }}
+                  onDescriptionChange={setVersionDescription}
                   onSchemaChange={(schemaData: unknown, isDirty: boolean) => {
                     setExtractionSchema(schemaData as unknown[] | null);
                     if (isDirty) {
-                      dismissSaveSuccess();
                       const updatedConfig = { ...formValues };
                       // CRITICAL: Always set classes, even if empty array (to support wipe all functionality)
                       // Handle null (no classes) by setting empty array
@@ -2710,7 +2681,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
                   onRuleSchemaChange={(schemaData: unknown, isDirty: boolean) => {
                     setRuleSchema(schemaData as unknown[] | null);
                     if (isDirty) {
-                      dismissSaveSuccess();
                       const updatedConfig = { ...formValues };
                       // CRITICAL: Always set policy_classes, even if empty array
                       if (schemaData === null) {
