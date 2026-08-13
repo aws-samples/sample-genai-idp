@@ -5,6 +5,7 @@
 import importlib.util
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
 import pytest
@@ -675,7 +676,9 @@ def test_aborted_run_without_metrics_does_not_requeue():
     mock_sqs.send_message.assert_not_called()
 
 
-def _status_table_for(test_run_id, files, stored_status, with_metrics=False):
+def _status_table_for(
+    test_run_id, files, stored_status, with_metrics=False, queued_at=None
+):
     """Mock tracking table where every file is fully processed and evaluated."""
     metadata = {
         "PK": f"testrun#{test_run_id}",
@@ -687,6 +690,8 @@ def _status_table_for(test_run_id, files, stored_status, with_metrics=False):
     }
     if with_metrics:
         metadata["testRunResult"] = {"overallAccuracy": 0.72}
+    if queued_at is not None:
+        metadata["CacheUpdateQueuedAt"] = queued_at
 
     def get_item(Key):
         if Key["PK"] == f"testrun#{test_run_id}":
@@ -826,3 +831,182 @@ def test_claim_cache_update_slot_denies_on_condition_failure():
         patch.object(index.dynamodb, "Table", return_value=mock_table),
     ):
         assert index._claim_cache_update_slot("run-1", 300) is False
+
+
+# ---------------------------------------------------------------------------
+# Follow-up to #619 review: the "terminal but no metrics -> EVALUATING" rule is
+# now defined once, and the throttle window is read from the item already in
+# hand rather than by attempting a conditional write on every 5-second poll.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "status,has_metrics,expected",
+    [
+        # Terminal and metrics missing -> the aggregation really is outstanding.
+        ("COMPLETE", False, "EVALUATING"),
+        ("PARTIAL_COMPLETE", False, "EVALUATING"),
+        # Metrics present -> report the true status.
+        ("COMPLETE", True, "COMPLETE"),
+        ("PARTIAL_COMPLETE", True, "PARTIAL_COMPLETE"),
+        # ABORTED is terminal but is NOT eligible for aggregation, so it must
+        # never be masked as EVALUATING however its metrics look.
+        ("ABORTED", False, "ABORTED"),
+        ("ABORTED", True, "ABORTED"),
+        # Non-terminal statuses pass straight through.
+        ("RUNNING", False, "RUNNING"),
+        ("QUEUED", False, "QUEUED"),
+    ],
+)
+def test_display_status_rule(status, has_metrics, expected):
+    """One truth table for the badge, shared by all three resolvers."""
+    item = {"testRunResult": {"overallAccuracy": 0.7}} if has_metrics else {}
+    assert index._display_status(item, status) == expected
+    assert index._awaiting_metrics(item, status) is (expected == "EVALUATING")
+
+
+@pytest.mark.unit
+def test_build_test_run_list_uses_shared_rule_but_does_not_enqueue():
+    """The list view shows EVALUATING but must not fan out an enqueue per row.
+
+    One list render covers an arbitrary number of runs; enqueueing for each stuck
+    row would turn a page load into a burst of multi-minute aggregations. The
+    per-row getTestRunStatus poll drives recovery instead.
+    """
+    items = [
+        {
+            "TestRunId": "stuck-1",
+            "Status": "COMPLETE",
+            "CreatedAt": "2026-08-13T13:25:01.571600Z",
+        },
+        {
+            "TestRunId": "stuck-2",
+            "Status": "PARTIAL_COMPLETE",
+            "CreatedAt": "2026-08-13T13:25:01.571600Z",
+        },
+        {
+            "TestRunId": "aborted-1",
+            "Status": "ABORTED",
+            "CreatedAt": "2026-08-13T13:25:01.571600Z",
+        },
+        {
+            "TestRunId": "good-1",
+            "Status": "COMPLETE",
+            "testRunResult": {"overallAccuracy": 0.72},
+            "CreatedAt": "2026-08-13T13:25:01.571600Z",
+        },
+    ]
+    mock_sqs = Mock()
+
+    with patch.object(index, "sqs", mock_sqs):
+        result = index._build_test_run_list(items)
+
+    by_id = {r["testRunId"]: r["status"] for r in result}
+    assert by_id["stuck-1"] == "EVALUATING"
+    assert by_id["stuck-2"] == "EVALUATING"
+    assert by_id["aborted-1"] == "ABORTED"
+    assert by_id["good-1"] == "COMPLETE"
+    # The regression this pins: rendering a list is not a write path.
+    mock_sqs.send_message.assert_not_called()
+
+
+@pytest.mark.unit
+def test_cache_update_recently_queued_window():
+    """Recent -> suppress; stale/absent/garbage -> fall through to the claim."""
+    now = datetime.now(timezone.utc)
+
+    # Inside the window.
+    assert index._cache_update_recently_queued(
+        {"CacheUpdateQueuedAt": (now - timedelta(seconds=30)).isoformat()}, 300
+    )
+    # Outside the window -> due for another attempt.
+    assert not index._cache_update_recently_queued(
+        {"CacheUpdateQueuedAt": (now - timedelta(seconds=301)).isoformat()}, 300
+    )
+    # Never queued.
+    assert not index._cache_update_recently_queued({}, 300)
+    # Throttling explicitly disabled.
+    assert not index._cache_update_recently_queued(
+        {"CacheUpdateQueuedAt": now.isoformat()}, 0
+    )
+    # Unreadable value must not silently suppress recovery.
+    assert not index._cache_update_recently_queued(
+        {"CacheUpdateQueuedAt": "not-a-timestamp"}, 300
+    )
+    assert not index._cache_update_recently_queued({"CacheUpdateQueuedAt": 12345}, 300)
+    # A naive timestamp is treated as UTC rather than raising on the subtraction.
+    assert index._cache_update_recently_queued(
+        {"CacheUpdateQueuedAt": now.replace(tzinfo=None).isoformat()}, 300
+    )
+    # A future timestamp (clock skew) is not treated as "recent" in a way that
+    # could suppress recovery forever -- negative age falls through.
+    assert not index._cache_update_recently_queued(
+        {"CacheUpdateQueuedAt": (now + timedelta(seconds=60)).isoformat()}, 300
+    )
+
+
+@pytest.mark.unit
+def test_status_poll_skips_conditional_write_when_recently_queued():
+    """The hot path: a 5-second poll on a stuck run must not write to DynamoDB.
+
+    A rejected conditional write still consumes write capacity, so with the
+    aggregation already in flight the poll should not attempt one at all.
+    """
+    files = [f"doc{i}.pdf" for i in range(10)]
+    recent = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
+    mock_table = _status_table_for(
+        "in-flight-run", files, stored_status="COMPLETE", queued_at=recent
+    )
+    mock_sqs = Mock()
+    mock_claim = Mock(return_value=True)
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_claim_cache_update_slot", mock_claim),
+    ):
+        result = index.get_test_run_status("in-flight-run")
+
+    # Still reports the outstanding aggregation to the user...
+    assert result["status"] == "EVALUATING"
+    assert result["completedFiles"] == 10
+    # ...without a duplicate enqueue or the conditional write behind it.
+    mock_sqs.send_message.assert_not_called()
+    mock_claim.assert_not_called()
+    mock_table.update_item.assert_not_called()
+
+
+@pytest.mark.unit
+def test_status_poll_retries_once_throttle_window_expires():
+    """Convergence: after the window lapses, recovery is attempted again."""
+    files = [f"doc{i}.pdf" for i in range(10)]
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=400)).isoformat()
+    mock_table = _status_table_for(
+        "stale-claim-run", files, stored_status="COMPLETE", queued_at=stale
+    )
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_claim_cache_update_slot", return_value=True),
+    ):
+        result = index.get_test_run_status("stale-claim-run")
+
+    assert result["status"] == "EVALUATING"
+    mock_sqs.send_message.assert_called_once()
