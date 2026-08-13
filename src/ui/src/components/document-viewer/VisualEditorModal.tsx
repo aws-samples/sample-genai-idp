@@ -27,6 +27,7 @@ import FormFieldRenderer from './FormFieldRenderer';
 import JSONEditorTab from './JSONEditorTab';
 import type { BoxProps } from '@cloudscape-design/components';
 import PageImageViewer from '../common/PageImageViewer';
+import type { PageImageViewerHandle } from '../common/PageImageViewer';
 import EditHistoryTab from './EditHistoryTab';
 import ProcessingReportTab from './ProcessingReportTab';
 
@@ -158,6 +159,7 @@ const VisualEditorModal = ({
     setCollapsedPaths(allPaths);
   };
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewerRef = useRef<PageImageViewerHandle | null>(null);
 
   // Check if baseline is available - check multiple possible paths
   const sectionDocItem = sectionData?.documentItem as Record<string, unknown> | undefined;
@@ -775,11 +777,11 @@ const VisualEditorModal = ({
   };
 
   /**
-   * Double-click a field to zoom in on it. Only sets the active geometry; the
-   * viewer is passed zoomToFieldOnFocus and owns the zoom-and-center calculation.
+   * Double-click zooms; single-click only highlights. Zooming is requested
+   * explicitly on the viewer rather than driven by the active geometry, so
+   * clicking through fields outlines them in place instead of moving the page.
    */
   const handleFieldDoubleClick = (geometry: Record<string, unknown> | null) => {
-    logger.debug('VisualEditorModal - handleFieldDoubleClick called with geometry:', geometry);
     if (!geometry) return;
     if (geometry.page !== undefined && pageIds.length > 0) {
       const pageIndex = (geometry.page as number) - 1;
@@ -788,6 +790,8 @@ const VisualEditorModal = ({
       }
     }
     setActiveFieldGeometry(geometry);
+    // After the page switch has rendered, so the viewer measures the right image.
+    requestAnimationFrame(() => viewerRef.current?.zoomToField(geometry as never));
   };
 
   // Handle unsaved changes modal actions
@@ -969,18 +973,35 @@ const VisualEditorModal = ({
                     overflow: 'hidden',
                   }}
                 >
-                  <Container header={<Header variant="h3">Document Pages ({pageIds.length})</Header>}>
-                    <PageImageViewer
-                      pageIds={pageIdStrings}
-                      documentPages={documentPagesForViewer}
-                      activeFieldGeometry={activeFieldGeometry as never}
-                      onPageChange={(pageId) => setCurrentPage(pageId)}
-                      height="550px"
-                      // Human review zooms to the field being edited rather than
-                      // only outlining it.
-                      zoomToFieldOnFocus
-                    />
-                  </Container>
+                  {/* A plain bordered box rather than Cloudscape Container: the
+                      viewer needs a definite height to place its control strip, and
+                      Container's auto-height content box does not pass one down —
+                      a fixed height here overflowed the row on shorter viewports and
+                      clipped the zoom controls. */}
+                  <div
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      border: '1px solid #c6c6cd',
+                      borderRadius: '16px',
+                      padding: '12px',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <Header variant="h3">Document Pages ({pageIds.length})</Header>
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      <PageImageViewer
+                        pageIds={pageIdStrings}
+                        documentPages={documentPagesForViewer}
+                        activeFieldGeometry={activeFieldGeometry as never}
+                        onPageChange={(pageId) => setCurrentPage(pageId)}
+                        height="100%"
+                        zoomHandle={viewerRef}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Right side - Form fields - Independently scrollable */}
@@ -1063,6 +1084,13 @@ const VisualEditorModal = ({
                       }}
                     >
                       <ExtBox style={{ minHeight: 'fit-content' }}>
+                        {/* Read-only is the default here; without this the greyed
+                            inputs read as broken rather than as a mode. */}
+                        {isReadOnly && (
+                          <Box variant="small" color="text-body-secondary" padding={{ bottom: 'xs' }}>
+                            Viewing extracted values. To change them, close this and use <b>Edit mode</b> on the section.
+                          </Box>
+                        )}
                         {showEvaluation && baselineData && (
                           <Alert type="info" header="Evaluation Comparison Mode">
                             Showing predicted values with evaluation baseline. Fields with mismatches are highlighted with evaluation scores
