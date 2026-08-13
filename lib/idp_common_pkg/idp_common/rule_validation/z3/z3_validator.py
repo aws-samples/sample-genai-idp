@@ -484,7 +484,7 @@ class Z3Validator:
         token = tokens[pos]
 
         # Handle opening parenthesis (function application)
-        if token == "(":
+        if token == "(": # nosec B105
             pos += 1
             if pos >= len(tokens):
                 raise ValueError("Unexpected end after '('")
@@ -508,7 +508,7 @@ class Z3Validator:
             return result, pos
 
         # Handle closing parenthesis (shouldn't happen in well-formed input)
-        elif token == ")":
+        elif token == ")": # nosec B105
             raise ValueError("Unexpected ')'")
 
         # Handle atoms (variables, numbers, booleans, strings)
@@ -531,9 +531,9 @@ class Z3Validator:
             return z3_vars[token]
 
         # Check if it's a boolean
-        if token == "true":
+        if token == "true": # nosec B105
             return z3.BoolVal(True)
-        if token == "false":
+        if token == "false": # nosec B105
             return z3.BoolVal(False)
 
         # Check if it's a number

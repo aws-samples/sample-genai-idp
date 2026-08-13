@@ -104,7 +104,7 @@ def build_config_with_rules(rules):
             },
             "semaphore": 5,
             "max_chunk_size": 4000,
-            "token_size": 1000,
+            "token_size": 1000, # nosec B105
             "overlap_percentage": 0.1,
         },
     }

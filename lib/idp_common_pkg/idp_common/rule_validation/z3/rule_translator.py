@@ -371,7 +371,7 @@ class RuleTranslator:
         # Use hash of rule text + timestamp for uniqueness
         timestamp = str(int(time.time() * 1000))
         hash_input = f"{rule_text}{timestamp}".encode("utf-8")
-        hash_digest = hashlib.md5(hash_input).hexdigest()[:8]
+        hash_digest = hashlib.md5(hash_input, usedforsecurity=False).hexdigest()[:8]  # nosec B324
 
         return f"rule_{hash_digest}"
 
