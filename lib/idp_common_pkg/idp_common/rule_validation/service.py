@@ -198,7 +198,7 @@ class RuleValidationService:
         """
         policy_classes = config.get("policy_classes", [])
         for policy_class in policy_classes:
-            if policy_class.get("x-aws-idp-policy-type") == policy_type:
+            if _policy_type_of(policy_class) == policy_type:
                 rule_properties = policy_class.get("rule_properties", {})
                 metadata = []
                 for prop in rule_properties.values():
