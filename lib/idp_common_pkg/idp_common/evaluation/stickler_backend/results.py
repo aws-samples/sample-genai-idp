@@ -17,6 +17,7 @@ orchestration. The service provides ``field_config``, ``match_threshold``,
 ``SectionEvaluationResult``.
 """
 
+import types
 import typing
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
@@ -68,9 +69,7 @@ def _unwrap_annotation(annotation: Any) -> Any:
     parent field's annotation — ``LineItems: List[LineItem]`` → ``LineItem``.
     """
     origin = typing.get_origin(annotation)
-    if origin is typing.Union or origin is getattr(
-        __import__("types"), "UnionType", None
-    ):
+    if origin is typing.Union or origin is types.UnionType:
         args = [a for a in typing.get_args(annotation) if a is not type(None)]
         if not args:
             return annotation
@@ -91,7 +90,7 @@ def resolve_leaf_model_field(root_model_cls: Any, expected_key: str) -> Optional
     ``LineItems[0].Amount``, descends through nested-model / list / optional
     annotations and returns the ``FieldInfo`` for the leaf so its
     ``json_schema_extra._threshold`` (populated by ``ComparableField`` at model
-    build time — Stickler's actual applied threshold, R-fix-D) can be read
+    build time — Stickler's actual applied threshold) can be read
     without going through the JSON-schema ``x-aws-stickler-threshold`` extension.
 
     Returns None if the path can't be resolved.
@@ -161,7 +160,7 @@ def annotate_nested_comparison_methods(
 
     Mutates the dicts in place (adds ``evaluation_method`` and ``weight``).
 
-    Threshold source of truth (R-fix-D): when ``root_model_cls`` is supplied,
+    Threshold source of truth: when ``root_model_cls`` is supplied,
     the per-leaf threshold is read from
     ``model_fields[…].json_schema_extra._threshold`` on the Stickler model —
     the value ``ComparableField`` stashed at build time and the one Stickler's
@@ -284,7 +283,7 @@ def transform_stickler_result(
     actual_dict = _instance_to_dict(actual_instance)
 
     # Root model class — used to read Stickler's applied per-field threshold
-    # from ``model_fields[...].json_schema_extra._threshold`` (R-fix-D).
+    # from ``model_fields[...].json_schema_extra._threshold``.
     # Available whenever the section produced a Stickler comparison; falls
     # back to schema-only reads otherwise (auto-generated schemas that failed
     # to build a model, etc.).
@@ -317,7 +316,7 @@ def transform_stickler_result(
     # ``configured_threshold`` (schema extension or NUMERIC_EXACT tolerance)
     # becomes ``AttributeEvaluationResult.evaluation_threshold`` — the user's
     # explicit configuration, preserved as ``None`` when nothing was set.
-    # ``applied_threshold`` (from the Stickler model, R-fix-D) is what
+    # ``applied_threshold`` (from the Stickler model) is what
     # Stickler actually scored against; it's only used to build the Method
     # display string and is not persisted on the dataclass.
     field_configs: Dict[str, Dict[str, Any]] = {}
@@ -371,7 +370,7 @@ def transform_stickler_result(
         field_specific_threshold = field_config.get("threshold")
         comparator_method = field_config.get("comparator")
         # The Method display string uses Stickler's applied threshold when the
-        # operator omitted an explicit one (R-fix-D) — that's the value
+        # operator omitted an explicit one — that's the value
         # Stickler's reason string ``"below threshold (X < Y)"`` uses for Y.
         # Falls back to the configured value when the model lookup wasn't
         # possible (e.g. auto-generated section with no built model).
