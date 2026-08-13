@@ -23,6 +23,7 @@ import os
 import shutil
 import tempfile
 import threading
+from decimal import Decimal
 
 import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
@@ -116,6 +117,13 @@ def _run_job(payload):
             job_id,
             "COMPLETED",
             f"{uploaded} document(s) in test set {test_set_id}",
+            usage=result.usage.as_dict() if result.usage else None,
+            run_config={
+                "docCount": count,
+                "threshold": threshold,
+                "augment": augment,
+                "modelId": model_id,
+            },
         )
         _update_test_set(test_set_id, "COMPLETED", file_count=total or uploaded)
     except Exception as e:
@@ -224,7 +232,18 @@ def _update_test_set(test_set_id, status, file_count=None):
         logger.warning("Failed to update test set %s", test_set_id, exc_info=True)
 
 
-def _post_status(payload, job_id, status, message):
+def _decimalize(value):
+    """DynamoDB has no float type, so coerce numerics on the way in."""
+    if isinstance(value, float):
+        return Decimal(str(round(value, 4)))
+    if isinstance(value, dict):
+        return {k: _decimalize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_decimalize(v) for v in value]
+    return value
+
+
+def _post_status(payload, job_id, status, message, usage=None, run_config=None):
     # The processor invokes this runtime asynchronously and returns, so the
     # runtime writes terminal status to BootstrapTrackingTable itself. Best-effort.
     logger.info("synthesis job %s: %s — %s", job_id, status, message)
@@ -236,6 +255,13 @@ def _post_status(payload, job_id, status, message):
         attrs["statusMessage"] = message
     if status == "FAILED" and message:
         attrs["errorMessage"] = message
+    # Tokens, pipeline attempts and mean critic score, plus the inputs that drive
+    # them. Recorded so a cost/duration estimate can be calibrated on observed
+    # runs rather than constants; unrecoverable once the run ends.
+    if usage is not None:
+        attrs["usage"] = _decimalize(usage)
+    if run_config is not None:
+        attrs["runConfig"] = _decimalize(run_config)
     kwargs = {
         "Key": {"jobId": job_id},
         "UpdateExpression": "SET " + ", ".join(f"#{k} = :{k}" for k in attrs),
