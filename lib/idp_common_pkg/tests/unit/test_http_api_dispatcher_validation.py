@@ -382,4 +382,4 @@ def test_required_arg_count_is_stable(spec):
     required = [
         f for f, v in spec["fields"].items() if any(a["non_null"] for a in v["args"])
     ]
-    assert len(required) == 90
+    assert len(required) == 91

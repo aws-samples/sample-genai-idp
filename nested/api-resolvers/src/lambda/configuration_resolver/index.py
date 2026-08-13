@@ -1099,10 +1099,7 @@ def handle_set_active_version(manager, version):
             if use_bda:
                 bda_arn = manager.get_bda_project_arn(version)
                 if bda_arn:
-                    # Has linked project — mark as needing sync (actual sync happens via UI or next sync call)
-                    bda_sync_status = manager.get_bda_project_arn(
-                        version
-                    )  # Check current status
+                    # Has linked project — log for visibility
                     logger.info(
                         f"Version {version} activated with BDA project {bda_arn}"
                     )
@@ -1236,6 +1233,11 @@ def handle_generate_rule_json(rule_description: str):
     inline in the config under x-aws-idp-rule-json by the frontend when the
     user saves.
 
+    Note on metering: This is a config-authoring operation (not per-document
+    processing), so Bedrock token usage is logged but not merged into
+    document.metering. Per-document Z3 calls (fact extraction + value
+    extraction) go through idp_common.bedrock and ARE metered.
+
     Args:
         rule_description: Natural language rule text (e.g., "coverage_amount
             divided by annual_income must be less than or equal to 20")
@@ -1259,6 +1261,7 @@ def handle_generate_rule_json(rule_description: str):
         rule_json = translator.translate_rule(
             natural_language_rule=rule_description,
             data_example={},
+            extract_paths=False,
         )
 
         # Convert to dict for JSON serialization

@@ -140,24 +140,6 @@ class RuleValidationService:
             self._semaphore = asyncio.Semaphore(self.semaphore_limit)
         return self._semaphore
 
-    @property
-    def z3_adapter(self):
-        """Lazily instantiate Z3EngineAdapter on first Z3 rule encounter.
-
-        If the adapter was already eagerly initialized in __init__ (because
-        config had z3 settings), returns the existing instance. Otherwise,
-        creates a new adapter with the current config and region.
-
-        Returns:
-            Z3EngineAdapter instance ready for rule validation.
-        """
-        if self._z3_adapter is None:
-            from idp_common.rule_validation.z3_engine import Z3EngineAdapter
-
-            self._z3_adapter = Z3EngineAdapter(config=self.config, region=self.region)
-            logger.info("Z3EngineAdapter lazily initialized on first Z3 rule encounter")
-        return self._z3_adapter
-
     async def _get_z3_adapter(self):
         """Get or lazily create the Z3EngineAdapter (coroutine-safe).
 
@@ -195,34 +177,6 @@ class RuleValidationService:
             f"Extracted {len(policy_types)} policy types from policy_classes: {policy_types}"
         )
         return policy_types
-
-    def _get_rule_questions(
-        self, config: Dict[str, Any], policy_type: str
-    ) -> List[str]:
-        """
-        Extract rule questions for a specific policy type from policy_classes.
-
-        Args:
-            config: Configuration dictionary
-            policy_type: Policy type to get questions for
-
-        Returns:
-            List of rule question strings
-        """
-        policy_classes = config.get("policy_classes", [])
-        for policy_class in policy_classes:
-            if _policy_type_of(policy_class) == policy_type:
-                rule_properties = policy_class.get("rule_properties", {})
-                questions = [
-                    prop.get("description")
-                    for prop in rule_properties.values()
-                    if prop.get("description")
-                ]
-                logger.debug(
-                    f"Extracted {len(questions)} questions for policy_type '{policy_type}': {questions}"
-                )
-                return questions
-        logger.warning(f"No questions found for policy_type '{policy_type}'")
         return []
 
     def _get_rule_metadata(
@@ -721,146 +675,6 @@ class RuleValidationService:
                     "recommendation": "Information Not Found",
                     "reasoning": f"Error during processing: {str(e)}",
                 }
-
-    async def _process_z3_rule(
-        self,
-        rule_description: str,
-        policy_type: str,
-        extraction_results: Dict[str, Any],
-        document_text: str,
-        config: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """
-        Process a single rule using the Z3 engine.
-
-        Wraps Z3EngineAdapter.validate_rule in an executor since Z3 is synchronous.
-        Uses the same semaphore pool as LLM rules for concurrency control.
-
-        Args:
-            rule_description: The rule question/description to evaluate
-            policy_type: Type of policy
-            extraction_results: Structured extraction results from prior pipeline stages
-            document_text: Raw document text for fallback extraction
-            config: Configuration for the validation
-
-        Returns:
-            Validated response dictionary matching LLM response shape
-        """
-        async with self.semaphore:
-            try:
-                task_id = str(uuid.uuid4())[:8]
-                logger.debug(
-                    f"Z3 start task_id={task_id} policy_type='{policy_type}' "
-                    f"rule='{rule_description[:60]}...'"
-                )
-
-                start_time = time.time()
-
-                # Run the synchronous Z3 validation in a thread pool
-                adapter = await self._get_z3_adapter()
-                result = await asyncio.to_thread(
-                    adapter.validate_rule,
-                    rule_description,
-                    policy_type,
-                    extraction_results or {},
-                    document_text,
-                    config.get("output_bucket"),  # output_bucket
-                    config.get("input_key", ""),  # cache_prefix
-                )
-
-                duration = time.time() - start_time
-                logger.debug(
-                    f"Z3 complete task_id={task_id} policy_type='{policy_type}' "
-                    f"rule='{rule_description[:60]}...' duration={duration:.2f}s "
-                    f"recommendation={result.get('recommendation')}"
-                )
-
-                return result
-
-            except Exception as e:
-                logger.error(
-                    f"Error processing Z3 rule '{rule_description[:80]}': {str(e)}"
-                )
-                return {
-                    "rule_type": policy_type,
-                    "rule": rule_description,
-                    "recommendation": "Information Not Found",
-                    "reasoning": f"Z3 engine error: {str(e)}",
-                    "supporting_pages": [],
-                    "_z3_error": True,
-                }
-
-    async def _process_z3_rule_with_fallback(
-        self,
-        rule_description: str,
-        policy_type: str,
-        extraction_results: Dict[str, Any],
-        document_text: str,
-        config: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """
-        Process a rule via Z3 with automatic LLM fallback on error.
-
-        When the Z3 engine returns "Information Not Found" (indicating a
-        translation, extraction, or solver error), logs a warning and
-        re-processes the rule via the LLM engine as a fallback.
-
-        If the LLM engine also fails, returns the LLM error result.
-
-        Args:
-            rule_description: The rule question/description to evaluate
-            policy_type: Type of policy
-            extraction_results: Structured extraction results from prior pipeline stages
-            document_text: Raw document text for fallback extraction
-            config: Configuration for the validation
-
-        Returns:
-            Validated response dictionary — either Z3 result on success,
-            or LLM result on Z3 failure (fallback).
-        """
-        # First, attempt Z3 validation
-        z3_result = await self._process_z3_rule(
-            rule_description=rule_description,
-            policy_type=policy_type,
-            extraction_results=extraction_results,
-            document_text=document_text,
-            config=config,
-        )
-
-        # Check if Z3 returned an error
-        if z3_result.get("_z3_error"):
-            logger.warning(
-                f"Z3 engine failed for rule '{rule_description[:80]}' in "
-                f"policy_type '{policy_type}': {z3_result.get('reasoning', 'unknown error')}. "
-                f"Falling back to LLM engine."
-            )
-
-            # Fall back to LLM engine
-            llm_result = await self._process_rule_question(
-                rule=rule_description,
-                user_history=document_text,
-                policy_type=policy_type,
-                config=config,
-                extraction_results=extraction_results,
-            )
-
-            # Return LLM result regardless of success or failure
-            return llm_result
-
-        # Z3 succeeded — return its result
-        return z3_result
-
-    def _load_rule_json_from_s3(self, rule_id: str) -> Optional[Dict[str, Any]]:
-        """
-        DEPRECATED: This method is no longer used. RuleJSON is now embedded
-        directly in the config under x-aws-idp-rule-json.
-        Kept temporarily for backward compatibility.
-        """
-        logger.warning(
-            f"_load_rule_json_from_s3 called but RuleJSON should be in config. "
-            f"rule_id={rule_id}"
-        )
-        return None
 
     async def _process_z3_fact_extraction(
         self,

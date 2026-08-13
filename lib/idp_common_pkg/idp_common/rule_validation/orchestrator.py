@@ -788,8 +788,8 @@ class RuleValidationOrchestratorService:
         )
 
         # Step 2: Match responses against the Z3 lookup
-        # Group by rule_id, collecting all matching responses across sections
-        z3_rules_found = {}  # {rule_id: {"policy_type": ..., "rule": ..., "responses": [...]}}
+        # Group by (policy_type, rule_id) to avoid collisions across policy types
+        z3_rules_found = {}  # {(policy_type, rule_id): {"policy_type": ..., "rule": ..., "responses": [...]}}
 
         for policy_type, responses in all_responses.items():
             if not isinstance(responses, list):
@@ -799,13 +799,15 @@ class RuleValidationOrchestratorService:
                 key = (policy_type, rule_text)
                 if key in z3_rule_lookup:
                     rule_id = z3_rule_lookup[key]
-                    if rule_id not in z3_rules_found:
-                        z3_rules_found[rule_id] = {
+                    compound_key = (policy_type, rule_id)
+                    if compound_key not in z3_rules_found:
+                        z3_rules_found[compound_key] = {
                             "policy_type": policy_type,
                             "rule": rule_text,
+                            "rule_id": rule_id,
                             "responses": [],
                         }
-                    z3_rules_found[rule_id]["responses"].append(response)
+                    z3_rules_found[compound_key]["responses"].append(response)
 
         if not z3_rules_found:
             logger.debug(
@@ -820,10 +822,11 @@ class RuleValidationOrchestratorService:
         )
 
         # Step 3: Process each Z3 rule
-        z3_verdicts = {}  # {rule_id: verdict_dict}
+        z3_verdicts = {}  # {(policy_type, rule_id): verdict_dict}
 
-        for rule_id, rule_info in z3_rules_found.items():
+        for compound_key, rule_info in z3_rules_found.items():
             policy_type = rule_info["policy_type"]
+            rule_id = rule_info["rule_id"]
             rule_description = rule_info["rule"]
             section_responses = rule_info["responses"]
 
@@ -844,8 +847,8 @@ class RuleValidationOrchestratorService:
                     f"Z3 rule_id='{rule_id}': no facts extracted from any section. "
                     f"Cannot validate (strict mode)."
                 )
-                z3_verdicts[rule_id] = {
-                    "recommendation": "Fail",
+                z3_verdicts[compound_key] = {
+                    "recommendation": "Information Not Found",
                     "reasoning": (
                         "Z3 validation error: no facts were extracted from any "
                         "document section for this rule. Ensure the document "
@@ -863,8 +866,8 @@ class RuleValidationOrchestratorService:
                     f"RuleJSON not found for rule_id='{rule_id}' in config. "
                     f"Generate RuleJSON in the Config Editor before using Z3 engine."
                 )
-                z3_verdicts[rule_id] = {
-                    "recommendation": "Fail",
+                z3_verdicts[compound_key] = {
+                    "recommendation": "Information Not Found",
                     "reasoning": (
                         f"Z3 configuration error: RuleJSON (x-aws-idp-rule-json) "
                         f"is missing for rule_id='{rule_id}'. Use the 'Generate "
@@ -901,7 +904,7 @@ class RuleValidationOrchestratorService:
                     f"{missing_params} after LLM value extraction. "
                     f"Cannot complete Z3 validation (strict mode)."
                 )
-                z3_verdicts[rule_id] = {
+                z3_verdicts[compound_key] = {
                     "recommendation": "Information Not Found",
                     "reasoning": (
                         f"Z3 validation incomplete: could not extract values for "
@@ -931,7 +934,7 @@ class RuleValidationOrchestratorService:
             )
             verdict["policy_type"] = policy_type
             verdict["rule"] = rule_description
-            z3_verdicts[rule_id] = verdict
+            z3_verdicts[compound_key] = verdict
 
             logger.info(
                 f"Z3 rule_id='{rule_id}' verdict: {verdict.get('recommendation')}"
@@ -953,14 +956,15 @@ class RuleValidationOrchestratorService:
 
                 if key in z3_rule_lookup:
                     rule_id = z3_rule_lookup[key]
-                    verdict = z3_verdicts.get(rule_id)
+                    compound_key = (policy_type, rule_id)
+                    verdict = z3_verdicts.get(compound_key)
 
                     if verdict is not None:
                         # Z3 produced a verdict — add it once (skip duplicates
                         # from other sections for the same rule)
-                        if rule_id not in z3_verdicts_added:
+                        if compound_key not in z3_verdicts_added:
                             updated_responses.append(verdict)
-                            z3_verdicts_added.add(rule_id)
+                            z3_verdicts_added.add(compound_key)
                     else:
                         # Should not happen in strict mode — all paths produce
                         # a verdict. But if it does, hard fail.
@@ -968,7 +972,7 @@ class RuleValidationOrchestratorService:
                             {
                                 "policy_type": policy_type,
                                 "rule": rule_text,
-                                "recommendation": "Fail",
+                                "recommendation": "Information Not Found",
                                 "reasoning": "Z3 engine error: no verdict produced.",
                                 "supporting_pages": [],
                                 "_z3_validated": True,

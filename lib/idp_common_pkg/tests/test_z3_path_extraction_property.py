@@ -11,6 +11,7 @@ Validates: Requirements 6.1, 6.2
 
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
+
 from idp_common.rule_validation.z3.data_extractor import DataExtractor
 
 # --- Strategies ---

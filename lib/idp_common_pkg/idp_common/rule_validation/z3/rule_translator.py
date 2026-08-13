@@ -17,6 +17,7 @@ The translator includes:
 
 import json
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -95,7 +96,8 @@ class RuleTranslator:
         # Initialize Bedrock client
         try:
             self.bedrock_client = boto3.client(
-                service_name="bedrock-runtime", region_name=region or "us-east-1"
+                service_name="bedrock-runtime",
+                region_name=region or os.environ.get("AWS_REGION", "us-east-1"),
             )
         except Exception as e:
             raise TranslationError(
@@ -440,7 +442,7 @@ Do not extract paths from the data structure.
         self,
         prompt: str,
         rule_id: Optional[str] = None,
-        max_retries: int = 3,
+        max_retries: int = 1,
         initial_backoff: float = 1.0,
         use_extraction_config: bool = False,
     ) -> str:

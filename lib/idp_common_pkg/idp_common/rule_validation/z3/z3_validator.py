@@ -559,7 +559,7 @@ class Z3Validator:
             message=f"Unknown atom '{token}' in SMT-LIB constraint. "
             f"Expected a declared parameter name, numeric literal, or quoted string. "
             f"This may indicate an LLM translation error.",
-            component="z3_validator",
+            operation="parse_atom",
         )
 
     def _apply_smt_operator(self, op: str, args: List[Any]) -> Any:

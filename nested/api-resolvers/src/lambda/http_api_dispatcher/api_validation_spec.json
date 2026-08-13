@@ -465,6 +465,17 @@
         }
       ]
     },
+    "generateRuleJson": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "ruleDescription",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
     "getAgentChatMessages": {
       "args": [
         {
@@ -1594,17 +1605,6 @@
           "is_list": false,
           "name": "description",
           "non_null": false,
-          "type": "String"
-        }
-      ]
-    },
-    "generateRuleJson": {
-      "args": [
-        {
-          "elem_non_null": false,
-          "is_list": false,
-          "name": "ruleDescription",
-          "non_null": true,
           "type": "String"
         }
       ]

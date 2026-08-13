@@ -62,23 +62,21 @@ Rule (natural language) → [LLM Translation] → RuleJSON (SMT-LIB)
                                                     ↓
 Document Data → [Path Extraction or LLM Extraction] → Parameter Values
                                                     ↓
-                              [Z3 Solver] → sat (Pass) / unsat (Fail) / error (fallback to LLM)
+                              [Z3 Solver] → sat (Pass) / unsat (Fail) / error (Information Not Found)
 ```
 
-1. **Translation**: An LLM converts the natural-language rule into a `RuleJSON` structure containing typed parameters, path mappings, and SMT-LIB constraints. Translated rules are cached in memory (and optionally S3).
+1. **Translation**: An LLM converts the natural-language rule into a `RuleJSON` structure containing typed parameters and SMT-LIB constraints. Translation is triggered via the "Generate RuleJSON" button in the Config Editor; the result is stored inline in the config under `x-aws-idp-rule-json`.
 
-2. **Extraction**: Parameter values are extracted from document data:
-   - If the rule has `path_mappings` and structured data is available → direct path-based extraction (no LLM call)
-   - Otherwise → LLM-assisted extraction
+2. **Extraction**: In the orchestration step, an LLM call extracts typed parameter values from the collected facts (gathered per-section in the prior step).
 
 3. **Validation**: The Z3 solver checks whether the extracted values satisfy the constraints:
    - `sat` → **Pass** (rule satisfied)
    - `unsat` → **Fail** (rule violated)
-   - `error` → Falls back to LLM engine
+   - `error` / missing parameters → **Information Not Found**
 
-## Fallback Behavior
+## Strict Mode (Default)
 
-When Z3 encounters an error (translation failure, extraction failure, solver timeout), it automatically falls back to the LLM engine for that rule. Other rules in the same policy class are not affected.
+Z3 validation enforces strict mode: if the RuleJSON is missing, the rule_id is not configured, or required parameters cannot be extracted from the document, the rule returns a hard failure or "Information Not Found" — it does NOT silently fall back to LLM-based reasoning. This ensures the configured engine always runs and misconfigurations are visible.
 
 ## UI: Schema Builder Dropdown
 

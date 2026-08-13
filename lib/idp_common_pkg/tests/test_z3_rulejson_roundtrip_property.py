@@ -15,6 +15,7 @@ and deserializing back via `from_dict()` SHALL produce an equivalent RuleJSON in
 
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
+
 from idp_common.rule_validation.z3.models import Parameter, PathMapping, RuleJSON
 
 # --- Strategies ---

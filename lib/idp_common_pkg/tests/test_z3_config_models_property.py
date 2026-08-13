@@ -12,12 +12,13 @@ Validates: Requirements 3.1, 3.2, 3.3, 3.5
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
+
 from idp_common.config.models import (
     RuleValidationConfig,
     Z3RuleTranslatorConfig,
     Z3ValueExtractionConfig,
 )
-from pydantic import ValidationError
 
 # --- Strategies ---
 

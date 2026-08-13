@@ -208,6 +208,11 @@ operations:
     scope_checked: true
     enforced_in: *cfg
     args: { versionName: "__nope__" }
+  generateRuleJson:
+    groups: [Admin, Author]
+    kind: mutation
+    enforced_in: *cfg
+    args: { ruleDescription: "test rule" }
   deleteConfigVersion:
     groups: [Admin]
     kind: mutation

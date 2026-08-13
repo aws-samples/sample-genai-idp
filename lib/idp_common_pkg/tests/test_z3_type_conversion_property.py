@@ -18,6 +18,7 @@ SHALL be treated as not extracted.
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+
 from idp_common.rule_validation.z3.data_extractor import DataExtractor
 from idp_common.rule_validation.z3.exceptions import ExtractionError
 
