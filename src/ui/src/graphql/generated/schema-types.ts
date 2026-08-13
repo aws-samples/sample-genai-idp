@@ -534,6 +534,12 @@ export type FinetuningJobStatus =
   | 'TRAINING'
   | 'VALIDATING';
 
+export type GenerateRuleJsonResponse = {
+  error?: Maybe<ConfigurationError>;
+  ruleJson?: Maybe<Scalars['AWSJSON']['output']>;
+  success: Scalars['Boolean']['output'];
+};
+
 /**
  * A feature installed in this IDP stack via AWS Marketplace (or the simulator).
  *
@@ -671,6 +677,7 @@ export type Mutation = {
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
   deleteUser?: Maybe<Scalars['Boolean']['output']>;
+  generateRuleJson?: Maybe<GenerateRuleJsonResponse>;
   pauseCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
@@ -889,6 +896,11 @@ export type MutationDeleteTestsArgs = {
 
 export type MutationDeleteUserArgs = {
   userId: Scalars['ID']['input'];
+};
+
+
+export type MutationGenerateRuleJsonArgs = {
+  ruleDescription: Scalars['String']['input'];
 };
 
 
