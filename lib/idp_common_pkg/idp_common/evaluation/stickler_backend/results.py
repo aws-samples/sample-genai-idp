@@ -17,6 +17,7 @@ orchestration. The service provides ``field_config``, ``match_threshold``,
 ``SectionEvaluationResult``.
 """
 
+import typing
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from idp_common.evaluation.models import (
@@ -58,11 +59,96 @@ def resolve_leaf_schema(
     return current if isinstance(current, dict) else None
 
 
+def _unwrap_annotation(annotation: Any) -> Any:
+    """Descend into ``List[X]`` / ``Optional[X]`` to the underlying model class.
+
+    Stickler's ``ComparableField`` stores the resolved threshold on the LEAF
+    field's ``json_schema_extra``, which lives on the nested model's
+    ``model_fields``. To reach it we need to peel wrapper types off the
+    parent field's annotation — ``LineItems: List[LineItem]`` → ``LineItem``.
+    """
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union or origin is getattr(
+        __import__("types"), "UnionType", None
+    ):
+        args = [a for a in typing.get_args(annotation) if a is not type(None)]
+        if not args:
+            return annotation
+        annotation = args[0]
+        origin = typing.get_origin(annotation)
+    if origin in (list, tuple):
+        args = typing.get_args(annotation)
+        if args:
+            annotation = args[0]
+    return annotation
+
+
+def resolve_leaf_model_field(root_model_cls: Any, expected_key: str) -> Optional[Any]:
+    """Walk a Stickler ``StructuredModel`` class to the leaf field's ``FieldInfo``.
+
+    Model-class analog of :func:`resolve_leaf_schema`. Given a root
+    ``StructuredModel`` subclass and a canonical comparison key like
+    ``LineItems[0].Amount``, descends through nested-model / list / optional
+    annotations and returns the ``FieldInfo`` for the leaf so its
+    ``json_schema_extra._threshold`` (populated by ``ComparableField`` at model
+    build time — Stickler's actual applied threshold, R-fix-D) can be read
+    without going through the JSON-schema ``x-aws-stickler-threshold`` extension.
+
+    Returns None if the path can't be resolved.
+    """
+    segments = [
+        seg.split("[", 1)[0] for seg in expected_key.split(".") if seg.split("[", 1)[0]
+    ]
+    if not segments:
+        return None
+
+    # First segment is the root attribute; walk from segment 1 down. At each
+    # step we peel List[]/Optional[] off the parent's annotation to reach the
+    # nested StructuredModel that owns the next leaf.
+    if not hasattr(root_model_cls, "model_fields"):
+        return None
+    current_field = root_model_cls.model_fields.get(segments[0])
+    for seg in segments[1:]:
+        if current_field is None:
+            return None
+        nested_cls = _unwrap_annotation(current_field.annotation)
+        if not hasattr(nested_cls, "model_fields"):
+            return None
+        current_field = nested_cls.model_fields.get(seg)
+    return current_field
+
+
+def applied_threshold_from_field_info(field_info: Any) -> Optional[float]:
+    """Read the applied threshold Stickler resolved for a field.
+
+    Stickler's ``ComparableField`` stashes ``_threshold`` on the field's
+    ``json_schema_extra`` at model build time; that value is what
+    ``ConfigurationHelper.get_comparison_info`` returns at compare time and
+    what Stickler's reason string ``"below threshold (X < Y)"`` uses for Y.
+    Reading it here — rather than the schema's ``x-aws-stickler-threshold``
+    extension — means the Method column in reports reflects the same number
+    Stickler actually applied, even when the operator wrote a bare method
+    annotation without an explicit threshold (Stickler's JSON-schema
+    converter defaults to 0.5 for that case; the previous display fallback
+    printed 0.7).
+
+    Returns None if the field / extra / attribute isn't present.
+    """
+    if field_info is None:
+        return None
+    extra = getattr(field_info, "json_schema_extra", None)
+    if extra is None:
+        return None
+    threshold = getattr(extra, "_threshold", None)
+    return threshold if isinstance(threshold, (int, float)) else None
+
+
 def annotate_nested_comparison_methods(
     field_comparisons: List[Dict[str, Any]],
     field_schema: Dict[str, Any],
     match_threshold: float,
     format_evaluation_method: Callable[..., str],
+    root_model_cls: Optional[Any] = None,
 ) -> None:
     """Add per-field ``evaluation_method`` and ``weight`` to nested comparisons.
 
@@ -75,12 +161,24 @@ def annotate_nested_comparison_methods(
 
     Mutates the dicts in place (adds ``evaluation_method`` and ``weight``).
 
+    Threshold source of truth (R-fix-D): when ``root_model_cls`` is supplied,
+    the per-leaf threshold is read from
+    ``model_fields[…].json_schema_extra._threshold`` on the Stickler model —
+    the value ``ComparableField`` stashed at build time and the one Stickler's
+    ``ConfigurationHelper`` uses at compare time. This makes the Method
+    column agree with Stickler's ``"below threshold (X < Y)"`` reason string
+    even for fields where the operator wrote a bare method annotation with no
+    explicit threshold (Stickler defaults 0.5; ``_format_evaluation_method``
+    previously guessed 0.7 from a hardcoded per-method table that has since
+    been removed). Schema-based lookup is kept as a fallback for callers
+    that don't thread the model class through.
+
     UPSTREAM: candidate for `awslabs/stickler` — emit comparator name +
     weight + threshold + list_match_threshold on every ``field_comparisons``
     row so downstream renderers don't have to re-walk the schema. Delete this
-    function (and ``resolve_leaf_schema``) once upstream carries the metadata.
-    No open issue yet — file one if this branch survives beyond one Stickler
-    upgrade.
+    function (and ``resolve_leaf_schema`` / ``resolve_leaf_model_field``)
+    once upstream carries the metadata. No open issue yet — file one if this
+    branch survives beyond one Stickler upgrade.
 
     Args:
         field_comparisons: Stickler nested comparison dicts for one attribute.
@@ -89,6 +187,11 @@ def annotate_nested_comparison_methods(
         format_evaluation_method: Callback that produces the display string
             (kept as a callback so this module doesn't depend on service.py's
             display helpers).
+        root_model_cls: The Stickler ``StructuredModel`` subclass for the
+            section (``type(expected_instance)``). When provided, the per-leaf
+            threshold is read from the model rather than from the schema
+            extension. Pass ``None`` and the function falls back to the
+            schema-only behavior.
     """
     for fc in field_comparisons:
         key = str(fc.get("expected_key") or fc.get("actual_key") or "")
@@ -101,6 +204,16 @@ def annotate_nested_comparison_methods(
             list_match_threshold = leaf_schema.get("x-aws-stickler-match-threshold")
         else:
             comparator = threshold = weight = list_match_threshold = None
+
+        # Prefer Stickler's applied threshold from the model — the schema's
+        # x-aws-stickler-threshold extension is absent for bare method
+        # annotations (operator wrote FUZZY without evaluation-threshold), but
+        # ComparableField still stashed the resolved value on _threshold.
+        if root_model_cls is not None:
+            leaf_field_info = resolve_leaf_model_field(root_model_cls, key)
+            applied = applied_threshold_from_field_info(leaf_field_info)
+            if applied is not None:
+                threshold = applied
 
         fc["evaluation_method"] = format_evaluation_method(
             comparator_method=comparator,
@@ -170,6 +283,13 @@ def transform_stickler_result(
     expected_dict = _instance_to_dict(expected_instance)
     actual_dict = _instance_to_dict(actual_instance)
 
+    # Root model class — used to read Stickler's applied per-field threshold
+    # from ``model_fields[...].json_schema_extra._threshold`` (R-fix-D).
+    # Available whenever the section produced a Stickler comparison; falls
+    # back to schema-only reads otherwise (auto-generated schemas that failed
+    # to build a model, etc.).
+    root_model_cls = type(expected_instance) if expected_instance is not None else None
+
     field_scores = stickler_result.get("field_scores", {})
     field_comparisons = stickler_result.get("field_comparisons", [])
 
@@ -193,6 +313,13 @@ def transform_stickler_result(
     # ``evaluation-threshold`` into ``comparator-config.tolerance`` (R1) — pick
     # that up as the display threshold so the report keeps showing the
     # user-configured value.
+    #
+    # ``configured_threshold`` (schema extension or NUMERIC_EXACT tolerance)
+    # becomes ``AttributeEvaluationResult.evaluation_threshold`` — the user's
+    # explicit configuration, preserved as ``None`` when nothing was set.
+    # ``applied_threshold`` (from the Stickler model, R-fix-D) is what
+    # Stickler actually scored against; it's only used to build the Method
+    # display string and is not persisted on the dataclass.
     field_configs: Dict[str, Dict[str, Any]] = {}
     for field_name, field_schema in properties.items():
         comparator_cfg = field_schema.get("x-aws-stickler-comparator-config") or {}
@@ -201,8 +328,15 @@ def transform_stickler_result(
             if isinstance(comparator_cfg, dict)
             else None
         )
+        configured_threshold = field_schema.get("x-aws-stickler-threshold") or tolerance
+        applied_threshold: Optional[float] = None
+        if root_model_cls is not None and hasattr(root_model_cls, "model_fields"):
+            applied_threshold = applied_threshold_from_field_info(
+                root_model_cls.model_fields.get(field_name)
+            )
         field_configs[field_name] = {
-            "threshold": field_schema.get("x-aws-stickler-threshold") or tolerance,
+            "threshold": configured_threshold,
+            "applied_threshold": applied_threshold,
             "match_threshold": field_schema.get("x-aws-stickler-match-threshold"),
             "comparator": field_schema.get("x-aws-stickler-comparator"),
             "weight": field_schema.get("x-aws-stickler-weight"),
@@ -236,11 +370,19 @@ def transform_stickler_result(
 
         field_specific_threshold = field_config.get("threshold")
         comparator_method = field_config.get("comparator")
+        # The Method display string uses Stickler's applied threshold when the
+        # operator omitted an explicit one (R-fix-D) — that's the value
+        # Stickler's reason string ``"below threshold (X < Y)"`` uses for Y.
+        # Falls back to the configured value when the model lookup wasn't
+        # possible (e.g. auto-generated section with no built model).
+        display_threshold = (
+            field_config.get("applied_threshold") or field_specific_threshold
+        )
         evaluation_method_value = format_evaluation_method(
             comparator_method=comparator_method,
             expected_value=expected_value,
             actual_value=actual_value,
-            field_specific_threshold=field_specific_threshold,
+            field_specific_threshold=display_threshold,
             match_threshold=match_threshold,
             list_match_threshold=field_config.get("match_threshold"),
         )
@@ -252,6 +394,7 @@ def transform_stickler_result(
                 field_schema=properties.get(field_name, {}),
                 match_threshold=match_threshold,
                 format_evaluation_method=format_evaluation_method,
+                root_model_cls=root_model_cls,
             )
 
         attribute_results.append(
