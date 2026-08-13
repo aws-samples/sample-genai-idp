@@ -121,15 +121,15 @@ class Z3Validator:
             # Check for null values in required parameters (Requirement 9.2)
             null_params = self._check_null_values(parameters, values)
             if null_params:
-                # Null values in required parameters make constraint unsatisfiable
+                # Null values in required parameters — cannot evaluate the rule
                 execution_time_ms = (time.time() - start_time) * 1000
                 logger.info(
-                    f"Validation result: unsat (null required parameters) - "
+                    f"Validation result: error (null required parameters) - "
                     f"Solver time: {execution_time_ms:.2f}ms"
                 )
                 return ValidationResult(
                     rule_id=rule_id,
-                    outcome="unsat",
+                    outcome="error",
                     satisfied=False,
                     extracted_values=values,
                     model=None,
@@ -484,7 +484,7 @@ class Z3Validator:
         token = tokens[pos]
 
         # Handle opening parenthesis (function application)
-        if token == "(": # nosec B105
+        if token == "(":  # nosec B105
             pos += 1
             if pos >= len(tokens):
                 raise ValueError("Unexpected end after '('")
@@ -508,7 +508,7 @@ class Z3Validator:
             return result, pos
 
         # Handle closing parenthesis (shouldn't happen in well-formed input)
-        elif token == ")": # nosec B105
+        elif token == ")":  # nosec B105
             raise ValueError("Unexpected ')'")
 
         # Handle atoms (variables, numbers, booleans, strings)
@@ -531,9 +531,9 @@ class Z3Validator:
             return z3_vars[token]
 
         # Check if it's a boolean
-        if token == "true": # nosec B105
+        if token == "true":  # nosec B105
             return z3.BoolVal(True)
-        if token == "false": # nosec B105
+        if token == "false":  # nosec B105
             return z3.BoolVal(False)
 
         # Check if it's a number
@@ -750,10 +750,6 @@ class Z3Validator:
                 param_name not in extracted_values
                 or extracted_values[param_name] is None
             ):
-                continue
-
-            # Skip optional/computed parameters - let the solver compute them from constraints
-            if not param.required:
                 continue
 
             value = extracted_values[param_name]

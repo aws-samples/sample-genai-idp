@@ -23,6 +23,29 @@ policy_classes:
         type: string
         description: "Total must equal subtotal + tax"
         x-aws-idp-validation-engine: z3    # Formal validation
+        x-aws-idp-rule-id: total_check
+        x-aws-idp-rule-json:              # Generated via Config Editor button
+          rule_id: total_check
+          version: "1.0"
+          description: "Total equals subtotal plus tax"
+          natural_language_rule: "Total must equal subtotal + tax"
+          parameters:
+            - name: total
+              type: Real
+              required: true
+              description: "Invoice total amount"
+            - name: subtotal
+              type: Real
+              required: true
+              description: "Invoice subtotal"
+            - name: tax
+              type: Real
+              required: true
+              description: "Tax amount"
+          constraints:
+            - "(= total (+ subtotal tax))"
+          path_mappings: []
+          metadata: {}
       signature_check:
         type: string
         description: "Document must be signed"
@@ -30,6 +53,10 @@ policy_classes:
 ```
 
 Valid values: `"llm"` (default) or `"z3"` (case-sensitive). If the field is absent, the rule defaults to the LLM engine.
+
+Z3 rules require:
+- `x-aws-idp-rule-id` — unique identifier for the rule
+- `x-aws-idp-rule-json` — the RuleJSON object (generate via the "Generate RuleJSON" button in the Config Editor)
 
 ### Z3 Engine Settings (Optional)
 

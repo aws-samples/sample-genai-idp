@@ -120,44 +120,12 @@ class RuleValidationService:
         self.token_size = self.config.rule_validation.token_size
         self.overlap_percentage = self.config.rule_validation.overlap_percentage
 
-        # Z3 engine adapter — eagerly initialize if config has Z3 settings,
-        # otherwise lazily instantiate on first Z3 rule encounter.
-        self._z3_adapter = None
-        self._z3_adapter_lock = asyncio.Lock()
-        if (
-            self.config.rule_validation.z3_rule_translator is not None
-            and self.config.rule_validation.z3_value_extraction is not None
-        ):
-            from idp_common.rule_validation.z3_engine import Z3EngineAdapter
-
-            self._z3_adapter = Z3EngineAdapter(config=self.config, region=self.region)
-            logger.info("Z3EngineAdapter eagerly initialized from config")
-
     @property
     def semaphore(self):
         """Lazy initialization of semaphore in current event loop."""
         if self._semaphore is None:
             self._semaphore = asyncio.Semaphore(self.semaphore_limit)
         return self._semaphore
-
-    async def _get_z3_adapter(self):
-        """Get or lazily create the Z3EngineAdapter (coroutine-safe).
-
-        Uses an asyncio.Lock to prevent concurrent initialization.
-        """
-        if self._z3_adapter is None:
-            async with self._z3_adapter_lock:
-                # Double-check after acquiring lock
-                if self._z3_adapter is None:
-                    from idp_common.rule_validation.z3_engine import Z3EngineAdapter
-
-                    self._z3_adapter = Z3EngineAdapter(
-                        config=self.config, region=self.region
-                    )
-                    logger.info(
-                        "Z3EngineAdapter lazily initialized on first Z3 rule encounter"
-                    )
-        return self._z3_adapter
 
     def _get_policy_types(self, config: Dict[str, Any]) -> List[str]:
         """
@@ -754,7 +722,7 @@ class RuleValidationService:
 
         Routes each rule to the appropriate engine based on its
         x-aws-idp-validation-engine field:
-          - "z3" → Z3EngineAdapter (deterministic SMT-LIB solving) with LLM fallback
+          - "z3" → fact extraction augmented with Z3 parameter context
           - "llm" or absent → LLM engine (semantic reasoning)
 
         All rules share the same semaphore pool for concurrency control.

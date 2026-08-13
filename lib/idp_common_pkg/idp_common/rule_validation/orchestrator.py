@@ -470,17 +470,19 @@ class RuleValidationOrchestratorService:
             return {}, False
 
     def _get_rule_json_from_config(
-        self, rule_id: str, config: Dict[str, Any]
+        self, rule_id: str, config: Dict[str, Any], policy_type: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         Load RuleJSON from the config's policy_classes (embedded inline).
 
         Looks for the x-aws-idp-rule-json field on the rule property that
-        matches the given rule_id.
+        matches the given rule_id, scoped to the specified policy_type to
+        avoid collisions when multiple policy classes share a rule_id.
 
         Args:
             rule_id: The unique rule identifier
             config: Configuration dictionary containing policy_classes
+            policy_type: If provided, only search within this policy class
 
         Returns:
             Parsed RuleJSON dict, or None if not found.
@@ -495,6 +497,13 @@ class RuleValidationOrchestratorService:
             policy_classes = config.get("rule_validation", {}).get("policy_classes", [])
 
         for policy_class in policy_classes:
+            # Scope to specified policy_type if provided
+            if policy_type:
+                pc_type = policy_class.get("x-aws-idp-policy-type") or policy_class.get(
+                    "x-aws-idp-rule-type"
+                )
+                if pc_type != policy_type:
+                    continue
             rule_properties = policy_class.get("rule_properties", {})
             for prop in rule_properties.values():
                 if prop.get(X_AWS_IDP_RULE_ID) == rule_id:
@@ -860,7 +869,9 @@ class RuleValidationOrchestratorService:
                 continue
 
             # Load RuleJSON from config (embedded inline)
-            rule_json_data = self._get_rule_json_from_config(rule_id, config)
+            rule_json_data = self._get_rule_json_from_config(
+                rule_id, config, policy_type
+            )
             if not rule_json_data:
                 logger.error(
                     f"RuleJSON not found for rule_id='{rule_id}' in config. "

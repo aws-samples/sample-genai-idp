@@ -442,7 +442,7 @@ Do not extract paths from the data structure.
         self,
         prompt: str,
         rule_id: Optional[str] = None,
-        max_retries: int = 1,
+        max_retries: int = 2,
         initial_backoff: float = 1.0,
         use_extraction_config: bool = False,
     ) -> str:

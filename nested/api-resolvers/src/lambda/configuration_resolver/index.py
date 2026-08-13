@@ -351,6 +351,14 @@ def handler(event, context):
                         "message": "ruleDescription is required and cannot be empty",
                     },
                 }
+            if len(rule_description) > 2000:
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": "ruleDescription cannot exceed 2000 characters",
+                    },
+                }
             return handle_generate_rule_json(rule_description.strip())
         else:
             raise Exception(f"Unsupported operation: {operation}")
