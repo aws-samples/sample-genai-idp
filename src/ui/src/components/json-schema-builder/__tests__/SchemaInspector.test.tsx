@@ -10,10 +10,10 @@
  * existing values, and overwrites invalid values with "llm".
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import SchemaInspector from '../SchemaInspector';
-import { X_AWS_IDP_VALIDATION_ENGINE } from '../../../constants/schemaConstants';
+import { X_AWS_IDP_VALIDATION_ENGINE, X_AWS_IDP_RULE_JSON } from '../../../constants/schemaConstants';
 
 // Helper to create a minimal selected attribute
 function makeAttribute(overrides: Record<string, unknown> = {}) {
@@ -258,5 +258,93 @@ describe('SchemaInspector Validation Engine Dropdown', () => {
       // onUpdate should NOT be called for valid values
       expect(onUpdate).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('SchemaInspector RuleJSON Section', () => {
+  let onUpdate: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onUpdate = vi.fn();
+  });
+
+  it('shows Generate RuleJSON button when engine=z3 and no rule_json exists', () => {
+    render(
+      <SchemaInspector
+        selectedClass={makeClass()}
+        selectedAttribute={makeAttribute({
+          [X_AWS_IDP_VALIDATION_ENGINE]: 'z3',
+          description: 'coverage / income <= 20',
+        })}
+        selectedAttributeName="coverage_ratio"
+        onUpdate={onUpdate}
+        isRuleSchema={true}
+      />,
+    );
+
+    expect(screen.getByText('Generate RuleJSON')).toBeInTheDocument();
+  });
+
+  it('does NOT show Generate RuleJSON button when engine=llm', () => {
+    render(
+      <SchemaInspector
+        selectedClass={makeClass()}
+        selectedAttribute={makeAttribute({
+          [X_AWS_IDP_VALIDATION_ENGINE]: 'llm',
+          description: 'must be signed',
+        })}
+        selectedAttributeName="signature_check"
+        onUpdate={onUpdate}
+        isRuleSchema={true}
+      />,
+    );
+
+    expect(screen.queryByText('Generate RuleJSON')).not.toBeInTheDocument();
+  });
+
+  it('shows RuleJSON configured status when rule_json exists', () => {
+    render(
+      <SchemaInspector
+        selectedClass={makeClass()}
+        selectedAttribute={makeAttribute({
+          [X_AWS_IDP_VALIDATION_ENGINE]: 'z3',
+          description: 'coverage / income <= 20',
+          [X_AWS_IDP_RULE_JSON]: {
+            rule_id: 'test',
+            parameters: [],
+            constraints: [],
+          },
+        })}
+        selectedAttributeName="coverage_ratio"
+        onUpdate={onUpdate}
+        isRuleSchema={true}
+      />,
+    );
+
+    expect(screen.getByText('RuleJSON configured')).toBeInTheDocument();
+    expect(screen.getByText('Regenerate')).toBeInTheDocument();
+    expect(screen.getByText('Edit')).toBeInTheDocument();
+    expect(screen.getByText('Remove')).toBeInTheDocument();
+  });
+
+  it('calls onUpdate with undefined rule_json when Remove is clicked', async () => {
+    render(
+      <SchemaInspector
+        selectedClass={makeClass()}
+        selectedAttribute={makeAttribute({
+          [X_AWS_IDP_VALIDATION_ENGINE]: 'z3',
+          description: 'test rule',
+          [X_AWS_IDP_RULE_JSON]: { rule_id: 'test', parameters: [], constraints: [] },
+        })}
+        selectedAttributeName="test_rule"
+        onUpdate={onUpdate}
+        isRuleSchema={true}
+      />,
+    );
+
+    const removeButton = screen.getByText('Remove');
+    fireEvent.click(removeButton);
+
+    expect(onUpdate).toHaveBeenCalledWith({ [X_AWS_IDP_RULE_JSON]: undefined });
   });
 });

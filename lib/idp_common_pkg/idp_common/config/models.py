@@ -2199,13 +2199,13 @@ class RuleValidationConfig(BaseModel):
     )
     z3_rule_translator: Optional[Z3RuleTranslatorConfig] = Field(
         default=None,
-        description="Z3 engine rule translator configuration. When provided with z3_value_extraction, "
-        "the Z3 engine uses these settings; otherwise falls back to default YAML configs.",
+        description="Z3 rule translator config (notebook/standalone use only — the deployed pipeline "
+        "uses the packaged translator_config.yaml via handle_generate_rule_json instead).",
     )
     z3_value_extraction: Optional[Z3ValueExtractionConfig] = Field(
         default=None,
-        description="Z3 engine value extraction configuration. When provided with z3_rule_translator, "
-        "the Z3 engine uses these settings; otherwise falls back to default YAML configs.",
+        description="Z3 value extraction config (notebook/standalone use only — the deployed pipeline "
+        "uses orchestrator._extract_z3_values_from_facts with fact_extraction settings instead).",
     )
     z3_timeout_ms: int = Field(
         default=5000,

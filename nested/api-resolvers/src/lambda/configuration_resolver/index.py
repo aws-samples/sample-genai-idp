@@ -9,6 +9,8 @@ import time
 
 import boto3
 from boto3.dynamodb.conditions import Key as DDBKey
+from pydantic import ValidationError
+
 from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.constants import (
     CONFIG_TYPE_CONFIG,
@@ -19,8 +21,6 @@ from idp_common.config.constants import (
 )
 from idp_common.config.models import IDPConfig, ModelConfigLimitsConfig, PricingConfig
 from idp_common.utils.log_sanitizer import sanitize_event_for_logging
-
-from pydantic import ValidationError
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))

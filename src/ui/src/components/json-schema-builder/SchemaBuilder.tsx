@@ -217,10 +217,23 @@ const SchemaBuilder = ({
 
       // Auto-generate rule_id for rule schemas from the attribute name
       if (isRuleSchema) {
-        const ruleId = attrName
+        let ruleId = attrName
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '_')
           .replace(/^_|_$/g, '');
+        // Ensure uniqueness within the class
+        const selectedClass = classes.find((c) => c.id === selectedClassId);
+        if (selectedClass) {
+          const existingIds = new Set(
+            Object.values(selectedClass.attributes?.properties || {}).map((p: Record<string, unknown>) => p[X_AWS_IDP_RULE_ID] as string),
+          );
+          let suffix = 2;
+          const baseId = ruleId;
+          while (existingIds.has(ruleId)) {
+            ruleId = `${baseId}_${suffix}`;
+            suffix++;
+          }
+        }
         updates[X_AWS_IDP_RULE_ID] = ruleId;
       }
 

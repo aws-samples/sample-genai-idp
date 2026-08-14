@@ -304,8 +304,14 @@ class ConfigLoader:
             )
 
         try:
+            # Allow env override for model_id (supports non-US regions/GovCloud)
+            import os
+
+            translator_model = os.environ.get(
+                "Z3_TRANSLATOR_MODEL_ID", translator_data["model_id"]
+            )
             translator_config = TranslatorConfig(
-                model_id=translator_data["model_id"],
+                model_id=translator_model,
                 temperature=translator_data["temperature"],
                 max_tokens=translator_data["max_tokens"],
                 system_prompt=translator_data["system_prompt"],
@@ -338,8 +344,11 @@ class ConfigLoader:
             )
 
         try:
+            extraction_model = os.environ.get(
+                "Z3_EXTRACTION_MODEL_ID", extraction_data["model_id"]
+            )
             extraction_config = ValueExtractionConfig(
-                model_id=extraction_data["model_id"],
+                model_id=extraction_model,
                 temperature=extraction_data["temperature"],
                 max_tokens=extraction_data["max_tokens"],
                 system_prompt=extraction_data["system_prompt"],
