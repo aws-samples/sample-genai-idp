@@ -145,7 +145,6 @@ class RuleValidationService:
             f"Extracted {len(policy_types)} policy types from policy_classes: {policy_types}"
         )
         return policy_types
-        return []
 
     def _get_rule_metadata(
         self, config: Dict[str, Any], policy_type: str

@@ -751,8 +751,8 @@ class RuleValidationOrchestratorService:
         3. For each Z3 rule: collect facts from all sections
         4. Call LLM to extract typed parameter values from the collected facts
         5. If all required parameters have values: run Z3 solver
-        6. If incomplete: fall back to LLM orchestrator reasoning
-        7. Replace matched responses with Z3 verdicts (or keep for LLM fallback)
+        6. If incomplete: return "Information Not Found" (strict mode)
+        7. Replace matched responses with Z3 verdicts
 
         Args:
             all_responses: All section responses grouped by policy_type
@@ -776,7 +776,9 @@ class RuleValidationOrchestratorService:
             policy_classes = config.get("rule_validation", {}).get("policy_classes", [])
 
         for policy_class in policy_classes:
-            policy_type = policy_class.get("x-aws-idp-policy-type")
+            policy_type = policy_class.get("x-aws-idp-policy-type") or policy_class.get(
+                "x-aws-idp-rule-type"
+            )
             if not policy_type:
                 continue
             rule_properties = policy_class.get("rule_properties", {})
