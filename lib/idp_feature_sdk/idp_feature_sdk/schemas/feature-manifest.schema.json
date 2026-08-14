@@ -164,10 +164,11 @@
           "postClassification",
           "postExtraction",
           "postRuleValidation",
-          "postSummarization"
+          "postSummarization",
+          "postprocessing"
         ]
       },
-      "description": "Map of pipeline hook point -> CloudFormation logical Lambda resource name in this template. The feature stack registers the resolved ARNs with the host via registerFeatureHooks at install time. `preprocessing` runs first (before BDA/pipeline routing); the rest are post-step."
+      "description": "Map of pipeline hook point -> CloudFormation logical Lambda resource name in this template. The feature stack registers the resolved ARNs with the host via registerFeatureHooks at install time. `preprocessing` runs first (before BDA/pipeline routing) and `postprocessing` runs last (after evaluation); each is a standalone section holding a SINGLE hook, so only one feature can own it. The `post*` step points in between each hold a list of hooks."
     },
     "agentSource": {
       "type": "object",

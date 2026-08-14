@@ -22,7 +22,7 @@ What it does, per document:
      NOT be redacted again. Belt-and-suspenders on top of the companion config
      version having no preprocessing hook.
   3. Read this hook's settings from the dispatcher-flattened `argsMap` (generic
-     key/value args on the preHook entry): mode, companion_config_version,
+     key/value args on the `preprocessing` section): mode, companion_config_version,
      model_id/model_provider, redaction_mode, detection_dpi, store_mapping. This
      keeps the preprocessing step hook-agnostic — no PII-specific config fields.
   4. Run the vendored pii-anonymizer detector+redactor over the source document

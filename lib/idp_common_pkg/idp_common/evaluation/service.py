@@ -116,11 +116,16 @@ def _normalize_comparator_name(comparator: str) -> str:
 # Comparison methods whose display string includes a similarity threshold.
 # NumericExact uses tolerance (not threshold) and LLM returns a binary match,
 # so neither shows a threshold suffix.
-_THRESHOLD_BASED_METHODS = {
-    "Fuzzy": 0.7,
-    "Semantic": 0.7,
-    "Levenshtein": 0.7,
-}
+#
+# The actual applied threshold comes from Stickler's model at compare time
+# (read in stickler_backend/results.py from
+# ``model_fields[...].json_schema_extra._threshold`` and threaded here as
+# ``field_specific_threshold``). When the caller can't produce that value
+# (auto-generated section that failed to build a model, non-Stickler path
+# reusing this helper), we render just the method name without a threshold
+# suffix rather than guessing at a hardcoded default that could disagree
+# with whatever Stickler actually scored against.
+_METHODS_WITH_THRESHOLD_DISPLAY = frozenset({"Fuzzy", "Semantic", "Levenshtein"})
 
 
 def _format_evaluation_method(
@@ -154,14 +159,14 @@ def _format_evaluation_method(
         # Normalize comparator name to UI-friendly format
         method = _normalize_comparator_name(comparator_method)
 
-        # Show threshold ONLY for methods that use similarity thresholds
-        if method in _THRESHOLD_BASED_METHODS:
-            display_threshold = (
-                field_specific_threshold
-                if field_specific_threshold is not None
-                else _THRESHOLD_BASED_METHODS[method]
-            )
-            method = f"{method} (threshold: {display_threshold:.2f})"
+        # Show threshold ONLY for methods that use similarity thresholds AND
+        # when the caller supplied the applied value. Missing threshold →
+        # render just the method name (no fake-default suffix).
+        if (
+            method in _METHODS_WITH_THRESHOLD_DISPLAY
+            and field_specific_threshold is not None
+        ):
+            method = f"{method} (threshold: {field_specific_threshold:.2f})"
         # Exact, NumericExact, LLM, Date don't show thresholds
         return method
 
@@ -184,13 +189,11 @@ def _format_evaluation_method(
         # Numbers use tolerance-based comparison - no threshold display
         return "NumericExact"
     if isinstance(expected_value, str) or isinstance(actual_value, str):
-        # Strings use fuzzy matching - show threshold
-        display_threshold = (
-            field_specific_threshold
-            if field_specific_threshold is not None
-            else _THRESHOLD_BASED_METHODS["Fuzzy"]
-        )
-        return f"Fuzzy (threshold: {display_threshold:.2f})"
+        # Strings default to fuzzy matching. Only include the threshold suffix
+        # when the caller could supply one (same reasoning as above).
+        if field_specific_threshold is not None:
+            return f"Fuzzy (threshold: {field_specific_threshold:.2f})"
+        return "Fuzzy"
 
     # Safe default for any other types
     return "Exact"

@@ -27,13 +27,24 @@ class StackState(str, Enum):
 class DocumentState(str, Enum):
     """Document processing state."""
 
+    # MUST stay a superset of idp_common.models.Status: this enum validates the
+    # ObjectStatus read straight out of the tracking table, so any runtime status
+    # missing here makes `idp-cli status` / `run-inference --monitor` die with a
+    # pydantic ValidationError ("Input should be 'QUEUED', ...") rather than
+    # reporting progress. Four were missing, and two of them are on ordinary
+    # paths: PREPROCESSING is set for EVERY document whenever a preprocessing
+    # hook is registered (so every PII Anonymization user hit it), and
+    # RULE_VALIDATION_POLICY_CLASSIFICATION for every rule-validation document.
+    PENDING_UPLOAD = "PENDING_UPLOAD"
     QUEUED = "QUEUED"
     STARTED = "STARTED"
     RUNNING = "RUNNING"
+    PREPROCESSING = "PREPROCESSING"
     OCR = "OCR"
     CLASSIFYING = "CLASSIFYING"
     EXTRACTING = "EXTRACTING"
     ASSESSING = "ASSESSING"
+    RULE_VALIDATION_POLICY_CLASSIFICATION = "RULE_VALIDATION_POLICY_CLASSIFICATION"
     RULE_VALIDATION = "RULE_VALIDATION"
     RULE_VALIDATION_ORCHESTRATOR = "RULE_VALIDATION_ORCHESTRATOR"
     SUMMARIZING = "SUMMARIZING"
@@ -44,6 +55,10 @@ class DocumentState(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     ABORTED = "ABORTED"
+    # Terminal: a preprocessing hook replaced this original with a redacted copy.
+    # Listed in the monitor's terminal-state sets too, or monitoring would wait
+    # forever for a document that will never reach COMPLETED.
+    REDACTED_SUPERSEDED = "REDACTED_SUPERSEDED"
     NOT_FOUND = "NOT_FOUND"
     UNKNOWN = "UNKNOWN"
 

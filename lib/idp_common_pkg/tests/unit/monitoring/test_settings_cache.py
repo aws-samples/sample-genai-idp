@@ -28,6 +28,35 @@ def _make_mock_ssm(settings: dict) -> MagicMock:
     return mock
 
 
+class _FakeClock:
+    """
+    Controllable stand-in for ``time.monotonic``.
+
+    Lets tests assert on retry *behaviour* (does a second read call SSM before or
+    after the retry window?) instead of on a derived age in seconds, and lets
+    them start from a low value to emulate a freshly-booted CI container
+    (GitHub #609).
+    """
+
+    def __init__(self, start: float = 0.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _patch_clock(monkeypatch, start: float = 0.0) -> _FakeClock:
+    """Install a :class:`_FakeClock` as the module's ``time.monotonic``."""
+    import idp_common.monitoring.settings_cache as sc_mod
+
+    clock = _FakeClock(start)
+    monkeypatch.setattr(sc_mod.time, "monotonic", clock)
+    return clock
+
+
 # ---------------------------------------------------------------------------
 # Basic cache behaviour
 # ---------------------------------------------------------------------------
@@ -163,10 +192,12 @@ class TestSSMFailureResilience:
 
     def test_ssm_failure_on_empty_cache_retries_after_short_window(self, monkeypatch):
         """
-        After a first-load SSM failure (empty cache), the cache_time is advanced
-        by (TTL - 30s) so that the next retry happens after ~30 seconds, NOT
-        after a full TTL period.  This prevents Lambda cold-start silent failures.
+        After a first-load SSM failure (empty cache), the next attempt happens
+        after the short ~30s window rather than a full TTL, so callers don't run
+        with no settings at all for the whole TTL.  Asserted on behaviour: does a
+        later read call SSM again?
         """
+        clock = _patch_clock(monkeypatch, start=9.0)  # fresh-container uptime
         monkeypatch.setenv("SETTINGS_PARAMETER_NAME", "/my/param")
         ssm = MagicMock()
         ssm.get_parameter.side_effect = Exception("SSM unavailable")
@@ -177,59 +208,115 @@ class TestSSMFailureResilience:
         cache.get("Key")
         assert ssm.get_parameter.call_count == 1
 
-        # Simulate time passing past the 30-second short window by resetting
-        # _cache_time to a value that would be expired relative to the 30s window.
-        # (We test the logic by checking _cache_time was set to approximately
-        # now - TTL + 30, meaning it will expire very soon again.)
-        # The TTL after a first-load failure should be close to -(TTL - 30) from now,
-        # i.e. it should expire far sooner than the full TTL.
-        import time
+        # Inside the 30s window: no retry.
+        clock.advance(29)
+        cache.get("Key")
+        assert ssm.get_parameter.call_count == 1, (
+            "should not retry SSM before the 30s window elapses"
+        )
 
-        assert cache._cache_time is not None  # refresh-failure path sets it
-        time_remaining = cache._ttl - (time.monotonic() - cache._cache_time)
-        # With a 300s TTL, remaining window should be close to 30s, not 300s
-        assert time_remaining < 60, (
-            f"Expected retry window ≈30s after empty-cache failure, got {time_remaining:.1f}s"
+        # Just past the 30s window: retry, well before the 300s TTL.
+        clock.advance(2)
+        cache.get("Key")
+        assert ssm.get_parameter.call_count == 2, (
+            "should retry SSM once the ~30s window elapses, not after a full TTL"
+        )
+
+    def test_empty_cache_retry_window_never_exceeds_ttl(self, monkeypatch):
+        """A TTL shorter than the 30s retry window must not be lengthened by it."""
+        clock = _patch_clock(monkeypatch, start=3.0)
+        monkeypatch.setenv("SETTINGS_PARAMETER_NAME", "/my/param")
+        ssm = MagicMock()
+        ssm.get_parameter.side_effect = Exception("SSM unavailable")
+        cache = SettingsCache(ttl_seconds=5, ssm_client=ssm)
+
+        cache.get("Key")
+        assert ssm.get_parameter.call_count == 1
+
+        clock.advance(6)  # past the 5s TTL but inside a naive 30s window
+        cache.get("Key")
+        assert ssm.get_parameter.call_count == 2, (
+            "retry window must be capped at the TTL when TTL < 30s"
         )
 
     def test_ssm_failure_on_stale_cache_defers_full_ttl(self, monkeypatch):
         """
         After a refresh failure when stale data is already cached, the retry is
         deferred for a full TTL period to avoid hammering SSM.
+
+        Regression test for GitHub #609: this used to be asserted via a derived
+        age computed from a back-dated ``_cache_time``, which broke when
+        ``time.monotonic()`` (seconds since boot) was small on a low-uptime CI
+        runner.  The clock is now explicit, so a low start value is the norm.
         """
+        clock = _patch_clock(monkeypatch, start=9.0)  # fresh-container uptime
         monkeypatch.setenv("SETTINGS_PARAMETER_NAME", "/my/param")
         ssm = MagicMock()
-        # First call succeeds, second call fails
+        # First call succeeds, all later calls fail
         ssm.get_parameter.side_effect = [
             {"Parameter": {"Value": '{"Key": "cached-value"}'}},
             Exception("SSM unavailable"),
+            Exception("SSM unavailable"),
         ]
-        cache = SettingsCache(ttl_seconds=0, ssm_client=ssm)  # TTL=0 → always expired
+        cache = SettingsCache(ttl_seconds=300, ssm_client=ssm)
 
-        cache.get("Key")  # succeeds — cache now has data
-        cache.get("Key")  # fails — stale data available, defer for full TTL
+        assert cache.get("Key") == "cached-value"  # succeeds — cache now has data
+        assert ssm.get_parameter.call_count == 1
+
+        clock.advance(301)  # TTL elapsed → refresh attempted, and it fails
+        assert cache.get("Key") == "cached-value", "stale value must still be served"
         assert ssm.get_parameter.call_count == 2
 
-        # After stale-cache failure, the retry window should be a full TTL away
-        # (for TTL=0, this means cache_time ≈ now, so _is_expired() is True again
-        # immediately — that's correct, TTL=0 always expires)
-        cache2 = SettingsCache(ttl_seconds=300, ssm_client=ssm)
-        cache2._cache = {"Key": "stale"}  # pre-populate to simulate stale data
-        cache2._cache_time = 0.0  # mark as expired
-
-        ssm2 = MagicMock()
-        ssm2.get_parameter.side_effect = Exception("SSM unavailable")
-        cache2._ssm_client = ssm2
-
-        import time
-
-        cache2.get("Key")  # fails but has stale data → should defer full TTL
-        assert cache2._cache_time is not None  # refresh-failure path sets it
-        time_remaining = cache2._ttl - (time.monotonic() - cache2._cache_time)
-        # Should be close to the full 300s TTL
-        assert time_remaining > 250, (
-            f"Expected full TTL retry window after stale-cache failure, got {time_remaining:.1f}s"
+        # Inside the deferral window: stale data is served without hitting SSM.
+        clock.advance(299)
+        assert cache.get("Key") == "cached-value"
+        assert ssm.get_parameter.call_count == 2, (
+            "should defer a full TTL before retrying when stale data is available"
         )
+
+        # Past the full-TTL deferral: retry.
+        clock.advance(2)
+        cache.get("Key")
+        assert ssm.get_parameter.call_count == 3
+
+    def test_recovery_after_failure_restores_normal_ttl(self, monkeypatch):
+        """Once a refresh succeeds, expiry goes back to plain TTL-based ageing."""
+        clock = _patch_clock(monkeypatch, start=4.0)
+        monkeypatch.setenv("SETTINGS_PARAMETER_NAME", "/my/param")
+        ssm = MagicMock()
+        ssm.get_parameter.side_effect = [
+            Exception("SSM unavailable"),
+            _make_ssm_response({"Key": "recovered"}),
+        ]
+        cache = SettingsCache(ttl_seconds=300, ssm_client=ssm)
+
+        assert cache.get("Key") == ""  # first load fails
+        clock.advance(31)  # short retry window elapses
+        assert cache.get("Key") == "recovered"
+        assert ssm.get_parameter.call_count == 2
+
+        # Fresh data: no further SSM calls until the TTL expires.
+        clock.advance(299)
+        cache.get("Key")
+        assert ssm.get_parameter.call_count == 2
+
+    def test_invalidate_overrides_pending_retry_window(self, monkeypatch):
+        """invalidate() means 'refresh now', even mid-retry-deferral."""
+        _patch_clock(monkeypatch, start=7.0)
+        monkeypatch.setenv("SETTINGS_PARAMETER_NAME", "/my/param")
+        ssm = MagicMock()
+        ssm.get_parameter.side_effect = [
+            Exception("SSM unavailable"),
+            _make_ssm_response({"Key": "v1"}),
+        ]
+        cache = SettingsCache(ttl_seconds=300, ssm_client=ssm)
+
+        cache.get("Key")  # fails → retry deadline pending
+        assert ssm.get_parameter.call_count == 1
+
+        cache.invalidate()
+        assert cache.get("Key") == "v1"  # no clock movement needed
+        assert ssm.get_parameter.call_count == 2
 
 
 # ---------------------------------------------------------------------------

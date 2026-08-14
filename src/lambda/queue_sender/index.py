@@ -29,6 +29,42 @@ queue_url = os.environ["QUEUE_URL"]
 retentionDays = int(os.environ["DATA_RETENTION_IN_DAYS"])
 
 
+def resolve_active_config_version(config_table):
+    """Return the version segment of the IsActive=true Config# row, or None.
+
+    Paginates. DynamoDB applies the 1MB page size to the items EXAMINED, not
+    the items matching FilterExpression, so a single scan call finds the active
+    row only when it falls within the first page. ProjectionExpression keeps
+    that page as wide as possible: without it the scan reads whole config
+    bodies (tens to hundreds of KB each), so only a few versions fit per page
+    and the active one is easily missed. Missing it here silently processes the
+    document under the DEFAULT config rather than the active one — the same
+    filtered-scan defect as issue #599.
+    """
+    scan_kwargs = {
+        "FilterExpression": (
+            "begins_with(Configuration, :config_prefix) AND IsActive = :active"
+        ),
+        "ExpressionAttributeValues": {
+            ":config_prefix": "Config#",
+            ":active": True,
+        },
+        "ProjectionExpression": "Configuration",
+    }
+    while True:
+        response = config_table.scan(**scan_kwargs)
+        for item in response.get("Items", []):
+            # Extract version from Config#v1 format
+            config_key = item["Configuration"]
+            if "#" in config_key:
+                return config_key.split("#", 1)[1]
+            return None
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            return None
+        scan_kwargs["ExclusiveStartKey"] = last_key
+
+
 @xray_recorder.capture("queue_sender")
 def handler(event, context):
     logger.info(f"Processing event: {json.dumps(event)}")
@@ -61,28 +97,17 @@ def handler(event, context):
             import boto3
 
             config_table = boto3.resource("dynamodb").Table(os.environ["CONFIG_TABLE"])
-            scan_response = config_table.scan(
-                FilterExpression="begins_with(Configuration, :config_prefix) AND IsActive = :active",
-                ExpressionAttributeValues={
-                    ":config_prefix": "Config#",
-                    ":active": True,
-                },
-            )
-            items = scan_response.get("Items", [])
-            if items:
-                # Extract version from Config#v1 format
-                config_key = items[0]["Configuration"]
-                if "#" in config_key:
-                    _, version = config_key.split("#", 1)
-                    document.config_version = version
-                    logger.info(
-                        f"Using active config version {version} for {object_key}"
-                    )
-                else:
-                    document.config_version = None
+            document.config_version = resolve_active_config_version(config_table)
+            if document.config_version:
+                logger.info(
+                    f"Using active config version {document.config_version} "
+                    f"for {object_key}"
+                )
             else:
-                document.config_version = None
-                logger.warning(f"No active config version found for {object_key}")
+                logger.warning(
+                    f"No active config version found for {object_key} after a "
+                    "full scan; it will be processed under the default config"
+                )
         except Exception as e:
             logger.warning(f"Could not retrieve active config version: {e}")
             document.config_version = None

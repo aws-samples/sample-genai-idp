@@ -332,7 +332,7 @@ Resources:
   ###########################################################################
   # UI deployer: copies the UMD bundle, registers the feature, and applies the
   # bundled preprocessing config preset (injecting this feature's preprocessing
-  # hook into the preset's preprocessing.preHook).
+  # hook into the preset's `preprocessing` section).
   ###########################################################################
   UiDeployerRole:
     Type: AWS::IAM::Role

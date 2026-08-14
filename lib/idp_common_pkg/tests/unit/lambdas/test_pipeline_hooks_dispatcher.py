@@ -1396,3 +1396,347 @@ def test_hook_supplied_wrapper_fields_are_not_overwritten(monkeypatch):
     )
     assert out["document"]["sections"] == ["1", "2", "3"]  # hook wins
     assert out["document"]["num_pages"] == 6  # absent -> back-filled
+
+
+# ---------------------------------------------------------------------------
+# Active-version resolution (issue #599).
+#
+# The dispatcher resolves the active config version with a FILTERED scan.
+# DynamoDB applies both `Limit` and the implicit 1MB page size to the items it
+# EXAMINES, not to the items that pass FilterExpression — so a single scan call
+# returns no match whenever the active row sorts beyond the first page, and the
+# dispatcher then falls back to Config#default, which carries no feature hooks.
+# Every pipeline hook stops firing while the workflow still reports success.
+#
+# Observed live on a v0.6.3 stack: 35 Config# rows, the active one at scan
+# position 33, a 10-item examine window — every hook silently stopped.
+# ---------------------------------------------------------------------------
+
+
+class _PagedScanTable:
+    """A table whose scan() reproduces DynamoDB's examine-then-filter paging.
+
+    `rows` is the full scan order. Each call examines at most `page_size` rows,
+    applies the IsActive filter to just those, and reports LastEvaluatedKey if
+    any rows remain — exactly how the real service bounds a filtered scan.
+    Correct callers must page until they find a match or run out of rows.
+    """
+
+    def __init__(self, rows, page_size=10):
+        self.rows = rows
+        self.page_size = page_size
+        self.scan_calls = 0
+
+    def scan(self, **kwargs):
+        self.scan_calls += 1
+        # A Limit, if the caller passes one, narrows the examine window further.
+        window = min(self.page_size, kwargs.get("Limit", self.page_size))
+        start = 0
+        if "ExclusiveStartKey" in kwargs:
+            key = kwargs["ExclusiveStartKey"]["Configuration"]
+            start = next(
+                i + 1 for i, r in enumerate(self.rows) if r["Configuration"] == key
+            )
+        examined = self.rows[start : start + window]
+        matched = [r for r in examined if r.get("IsActive") is True]
+        resp = {"Items": [{"Configuration": r["Configuration"]} for r in matched]}
+        if start + window < len(self.rows):
+            resp["LastEvaluatedKey"] = {"Configuration": examined[-1]["Configuration"]}
+        return resp
+
+
+def _config_rows(active_at, total=35):
+    """`total` Config# rows, exactly one of them active, at index `active_at`."""
+    return [
+        {"Configuration": f"Config#v{i}", "IsActive": i == active_at}
+        for i in range(total)
+    ]
+
+
+def test_active_version_found_beyond_the_first_scan_page(monkeypatch):
+    """The regression: the active row is at position 33 of 35, well past any
+    single examine window. Before the fix this resolved to 'default' and every
+    registered hook silently stopped firing."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    table = _PagedScanTable(_config_rows(active_at=33, total=35))
+
+    assert mod._resolve_active_version(table, None) == "v33"
+    assert table.scan_calls > 1, "must page rather than trust a single scan call"
+
+
+def test_active_version_found_on_the_very_last_page(monkeypatch):
+    """Boundary: the active row is the final item examined."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    assert (
+        mod._resolve_active_version(
+            _PagedScanTable(_config_rows(active_at=34, total=35)), None
+        )
+        == "v34"
+    )
+
+
+def test_active_version_resolution_stops_at_the_first_match(monkeypatch):
+    """Paging must not become a full-table walk when the active row is early —
+    the dispatcher runs at every hook point of every document."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    table = _PagedScanTable(_config_rows(active_at=0, total=500))
+    assert mod._resolve_active_version(table, None) == "v0"
+    assert table.scan_calls == 1
+
+
+def test_no_active_row_falls_back_to_default_with_a_warning(monkeypatch, caplog):
+    """A genuine "nothing is active" state still resolves to default, but must
+    say so at WARNING: logged at INFO it is indistinguishable from the ordinary
+    no-op of a host with no features installed, which is what hid #599."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    rows = [{"Configuration": f"Config#v{i}", "IsActive": False} for i in range(35)]
+    with caplog.at_level("WARNING"):
+        assert mod._resolve_active_version(_PagedScanTable(rows), None) == "default"
+    assert any(
+        r.levelname == "WARNING" and "No active Config# version" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_scan_failure_falls_back_to_default(monkeypatch):
+    """A throttled/failed scan must not fail the workflow."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Boom:
+        def scan(self, **kwargs):
+            raise RuntimeError("throttled")
+
+    assert mod._resolve_active_version(_Boom(), None) == "default"
+
+
+def test_pinned_version_still_skips_the_scan_entirely(monkeypatch):
+    """Pagination must not have introduced a scan on the pinned fast path."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    table = _PagedScanTable(_config_rows(active_at=0))
+    assert mod._resolve_active_version(table, "claims-pack-v0.4.0") == (
+        "claims-pack-v0.4.0"
+    )
+    assert table.scan_calls == 0
+
+
+def test_hooks_resolve_from_a_late_active_row_end_to_end(monkeypatch):
+    """Full handler path: with the active row late in scan order, the hook
+    registered in THAT version must actually be invoked. This is the assertion
+    the live failure would have tripped — `invoked` was 0."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    rows = _config_rows(active_at=33, total=35)
+
+    class _Table(_PagedScanTable):
+        def get_item(self, Key):
+            # Only the active version carries the hook.
+            if Key["Configuration"] != "Config#v33":
+                return {"Item": {"Configuration": Key["Configuration"]}}
+            return {
+                "Item": {
+                    "Configuration": "Config#v33",
+                    "rule_validation": {
+                        "postHook": [{"featureId": "claims-pack", "arn": "arn:cp"}]
+                    },
+                }
+            }
+
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: _Table(rows))
+    monkeypatch.setattr(mod, "_invoke_hook", lambda h, p: _ok({}))
+
+    out = mod.lambda_handler({"hookPoint": "postRuleValidation", "document": {}}, None)
+    assert out["invoked"] == 1
+    assert out["configVersion"] == "v33"
+
+
+def test_noop_reports_the_resolved_config_version(monkeypatch):
+    """`invoked: 0` alone cannot distinguish "the active version has no hooks
+    here" from "we resolved the wrong version", which is why #599 was
+    undiagnosable from the state machine output. The no-hooks result now names
+    the version it read."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "v33")
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [])
+    out = mod.lambda_handler({"hookPoint": "postOcr", "document": {"id": "w2"}}, None)
+    assert out["invoked"] == 0
+    assert out["configVersion"] == "v33"
+    # The state-machine-critical fields are still unconditionally present.
+    assert out["halt"] is False
+    assert out["document"] == {"id": "w2"}
+
+
+# ---------------------------------------------------------------------------
+# postprocessing — the standalone FINAL hook point (mirror of preprocessing)
+# ---------------------------------------------------------------------------
+
+
+def test_postprocessing_reads_single_flat_hook(monkeypatch):
+    """`postprocessing` is a flat single-hook section like `preprocessing`:
+    arn/args/onError live directly on it, with no postHook list — even though
+    the point name starts with "post"."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "postprocessing": {
+                        "enabled": True,
+                        "featureId": "delivery",
+                        "arn": "arn:deliver",
+                        "onError": "continue",
+                        "args": [{"key": "endpoint", "value": "https://sap"}],
+                    },
+                }
+            }
+
+    hooks = mod._read_hooks_from_config(_Table(), "default", "postprocessing")
+    assert len(hooks) == 1
+    assert hooks[0]["featureId"] == "delivery"
+    assert hooks[0]["arn"] == "arn:deliver"
+    assert hooks[0]["args"] == [{"key": "endpoint", "value": "https://sap"}]
+
+
+def test_postprocessing_is_flat_not_list_based(monkeypatch):
+    """Regression guard for the prefix heuristic this replaced: `postprocessing`
+    must NOT be read as a `postprocessing.postHook` list. A section carrying only
+    a postHook list yields no hook (there is no flat arn), which would have
+    silently swallowed a misconfigured entry."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    assert mod._is_flat_hook_point("postprocessing") is True
+    assert mod._is_flat_hook_point("preprocessing") is True
+    assert mod._is_flat_hook_point("postOcr") is False
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "postprocessing": {
+                        "postHook": [{"featureId": "x", "arn": "arn:x"}],
+                    },
+                }
+            }
+
+    assert mod._read_hooks_from_config(_Table(), "default", "postprocessing") == []
+
+
+def test_postprocessing_disabled_or_arnless_yields_no_hook(monkeypatch):
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Disabled:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "postprocessing": {"enabled": False, "arn": "arn:x"},
+                }
+            }
+
+    class _NoArn:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "postprocessing": {"enabled": True},
+                }
+            }
+
+    assert mod._read_hooks_from_config(_Disabled(), "d", "postprocessing") == []
+    assert mod._read_hooks_from_config(_NoArn(), "d", "postprocessing") == []
+
+
+def test_postprocessing_hook_can_mutate_the_final_document(monkeypatch):
+    """A postprocessing mutation is the last word on the document: the state
+    machine copies it into the workflow output, which the workflow tracker
+    persists."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/eval.json",
+        "document_id": "w2.pdf",
+    }
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/delivered.json",
+                    "document_id": "w2.pdf",
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "postprocessing", "document": inbound}, None)
+    assert out["document"]["s3_uri"].endswith("delivered.json")
+    assert out["documentUpdatedBy"] == ["f"]
+
+
+def test_postprocessing_halt_request_is_ignored(monkeypatch):
+    """There is nothing downstream to skip at `postprocessing`, so a `halt` is
+    reported as ignored rather than returned as a halt the state machine would
+    silently drop."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    _mutation_env(monkeypatch, mod, [_hook()], lambda h, p: _ok({"halt": True}))
+    out = mod.lambda_handler(
+        {"hookPoint": "postprocessing", "document": {"id": "w2"}}, None
+    )
+    assert out["halt"] is False
+    assert out["haltIgnored"] is True
+    # The document still flows through untouched.
+    assert out["document"] == {"id": "w2"}
+
+
+def test_preprocessing_halt_still_honored(monkeypatch):
+    """Guard the other side of _HALT_CAPABLE_POINTS: gating `halt` must not
+    have broken the PII-redaction short-circuit."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    _mutation_env(monkeypatch, mod, [_hook()], lambda h, p: _ok({"halt": True}))
+    out = mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"id": "w2"}}, None
+    )
+    assert out["halt"] is True
+    assert "haltIgnored" not in out
+
+
+def test_postprocessing_hook_sees_hitl_status(monkeypatch):
+    """The hook decides what to do based on HITL state, so the fields the
+    document carries must reach it verbatim (the workflow does not skip the hook
+    while a review is pending)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    inbound = {
+        "id": "w2.pdf",
+        "hitl_status": "PendingReview",
+        "hitl_triggered": True,
+        "hitl_sections_pending": ["1"],
+    }
+    seen = {}
+
+    def _capture(h, payload):
+        seen.update(payload)
+        return _ok({})
+
+    _mutation_env(monkeypatch, mod, [_hook()], _capture)
+    mod.lambda_handler({"hookPoint": "postprocessing", "document": inbound}, None)
+    assert seen["document"]["hitl_status"] == "PendingReview"
+    assert seen["document"]["hitl_triggered"] is True
+    assert seen["hookPoint"] == "postprocessing"

@@ -15,6 +15,22 @@ import boto3
 
 logger = logging.getLogger(__name__)
 
+# A document in one of these will never change again, so the monitor can stop
+# polling it. REDACTED_SUPERSEDED is terminal by design: a preprocessing hook
+# replaced the original with a redacted copy, so it never reaches COMPLETED —
+# without it here, monitoring spins until timeout on every redact-and-stop doc.
+_TERMINAL_STATES = frozenset(
+    {"COMPLETED", "FAILED", "ABORTED", "NOT_FOUND", "REDACTED_SUPERSEDED"}
+)
+# Terminal AND not a success. REDACTED_SUPERSEDED is deliberately NOT here: the
+# original was intentionally superseded, which is not a processing failure.
+_FAILED_STATES = frozenset({"FAILED", "ABORTED", "NOT_FOUND"})
+# Terminal and not a failure. REDACTED_SUPERSEDED counts as done so a batch
+# containing one can still reach 100%.
+_SUCCESS_STATES = frozenset({"COMPLETED", "REDACTED_SUPERSEDED"})
+# Accepted but not yet being worked on.
+_NOT_STARTED_STATES = frozenset({"QUEUED", "PENDING_UPLOAD", "UNKNOWN"})
+
 
 class ProgressMonitor:
     """Monitors document processing progress"""
@@ -95,7 +111,7 @@ class ProgressMonitor:
                 self._categorize_document(status, status_summary)
 
                 # Cache finished documents (terminal states)
-                if status["status"] in ["COMPLETED", "FAILED", "ABORTED", "NOT_FOUND"]:
+                if status["status"] in _TERMINAL_STATES:
                     self.finished_docs[status["document_id"]] = status
 
         except Exception as e:
@@ -106,12 +122,7 @@ class ProgressMonitor:
                     status = self.get_document_status(doc_id)
                     self._categorize_document(status, status_summary)
 
-                    if status["status"] in [
-                        "COMPLETED",
-                        "FAILED",
-                        "ABORTED",
-                        "NOT_FOUND",
-                    ]:
+                    if status["status"] in _TERMINAL_STATES:
                         self.finished_docs[status["document_id"]] = status
                 except Exception as e:
                     logger.error(f"Error getting status for {doc_id}: {e}")
@@ -200,28 +211,23 @@ class ProgressMonitor:
         """
         status_value = status["status"]
 
-        if status_value == "COMPLETED":
+        if status_value in _SUCCESS_STATES:
             status_summary["completed"].append(status)
-        elif status_value in ["FAILED", "ABORTED", "NOT_FOUND"]:
+        elif status_value in _FAILED_STATES:
             # NOT_FOUND is treated as failed - document was never tracked in DynamoDB
             if status_value == "NOT_FOUND":
                 status["error"] = "Document not found in tracking table"
                 status["failed_step"] = "QueueSender"
             status_summary["failed"].append(status)
-        elif status_value in [
-            "RUNNING",
-            "CLASSIFYING",
-            "EXTRACTING",
-            "ASSESSING",
-            "RULE_VALIDATION",
-            "RULE_VALIDATION_ORCHESTRATOR",
-            "SUMMARIZING",
-            "HITL_IN_PROGRESS",
-            "EVALUATING",
-        ]:
-            status_summary["running"].append(status)
-        else:
+        elif status_value in _NOT_STARTED_STATES:
             status_summary["queued"].append(status)
+        else:
+            # Anything else is a mid-pipeline step, so default to "running"
+            # rather than enumerating them. The previous explicit list omitted
+            # OCR, PREPROCESSING, POSTPROCESSING and
+            # RULE_VALIDATION_POLICY_CLASSIFICATION, so documents in those very
+            # ordinary states were reported as "Queued".
+            status_summary["running"].append(status)
 
     def get_document_status(self, doc_id: str) -> Dict:
         """
