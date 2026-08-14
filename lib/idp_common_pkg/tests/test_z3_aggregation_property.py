@@ -44,7 +44,7 @@ def policy_class_strategy(draw):
         )
         description = f"Rule {i}: {suffix}"
         engine = draw(engine_assignments)
-        rule_id = f"rule_{i}" if engine == "z3" else None
+        rule_id = f"rule_{i}" if engine == "z3" and draw(st.booleans()) else None
         rules.append({"description": description, "engine": engine, "rule_id": rule_id})
     return rules
 
@@ -89,7 +89,7 @@ def mixed_engine_policy_class_strategy(draw):
             ).filter(lambda s: s.strip())
         )
         engine = draw(engine_assignments)
-        rule_id = f"rule_{i}" if engine == "z3" else None
+        rule_id = f"rule_{i}" if engine == "z3" and draw(st.booleans()) else None
         rules.append(
             {"description": f"Rule {i}: {suffix}", "engine": engine, "rule_id": rule_id}
         )

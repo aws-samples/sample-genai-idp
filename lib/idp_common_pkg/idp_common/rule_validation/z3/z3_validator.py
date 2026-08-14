@@ -386,7 +386,15 @@ class Z3Validator:
             tokens = self._tokenize_smt(constraint_str)
 
             # Parse the token list into a Z3 expression
-            expr, _ = self._parse_smt_expr(tokens, 0, z3_vars)
+            expr, pos = self._parse_smt_expr(tokens, 0, z3_vars)
+
+            # Ensure all tokens were consumed (no trailing expressions silently dropped)
+            if pos != len(tokens):
+                raise ValueError(
+                    f"Unexpected tokens after position {pos}: "
+                    f"'{' '.join(tokens[pos:])}'. Each constraint must be a single "
+                    f"S-expression. Split multiple expressions into separate constraints."
+                )
 
             return expr
         except Exception as e:

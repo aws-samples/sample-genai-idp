@@ -730,7 +730,148 @@ class RuleValidationOrchestratorService:
                 "recommendation": "Information Not Found",
                 "reasoning": f"Z3 validation error in orchestrator: {e}",
                 "supporting_pages": supporting_pages or [],
+                "_z3_validated": True,
                 "_z3_error": True,
+            }
+
+    async def _process_single_z3_rule(
+        self,
+        compound_key,
+        rule_id: str,
+        policy_type: str,
+        rule_description: str,
+        section_responses: list,
+        config: dict,
+    ) -> dict:
+        """Process a single Z3 rule with error handling. Returns a verdict dict."""
+        try:
+            logger.info(
+                f"Processing Z3 rule_id='{rule_id}' with "
+                f"{len(section_responses)} section responses"
+            )
+
+            # Collect all extracted facts from all sections
+            all_facts = self._collect_facts_across_sections(section_responses)
+            logger.info(
+                f"Z3 rule_id='{rule_id}': collected {len(all_facts)} facts "
+                f"from {len(section_responses)} sections"
+            )
+
+            if not all_facts:
+                logger.error(
+                    f"Z3 rule_id='{rule_id}': no facts extracted from any section. "
+                    f"Cannot validate (strict mode)."
+                )
+                return {
+                    "policy_type": policy_type,
+                    "rule": rule_description,
+                    "recommendation": "Information Not Found",
+                    "reasoning": (
+                        "Z3 validation error: no facts were extracted from any "
+                        "document section for this rule. Ensure the document "
+                        "contains relevant data for the rule parameters."
+                    ),
+                    "supporting_pages": [],
+                    "_z3_validated": True,
+                }
+
+            # Load RuleJSON from config (embedded inline)
+            rule_json_data = self._get_rule_json_from_config(
+                rule_id, config, policy_type
+            )
+            if not rule_json_data:
+                logger.error(
+                    f"RuleJSON not found for rule_id='{rule_id}' in config. "
+                    f"Generate RuleJSON in the Config Editor before using Z3 engine."
+                )
+                return {
+                    "policy_type": policy_type,
+                    "rule": rule_description,
+                    "recommendation": "Information Not Found",
+                    "reasoning": (
+                        f"Z3 configuration error: RuleJSON (x-aws-idp-rule-json) "
+                        f"is missing for rule_id='{rule_id}'. Use the 'Generate "
+                        f"RuleJSON' button in the Config Editor to create it."
+                    ),
+                    "supporting_pages": [],
+                    "_z3_validated": True,
+                }
+
+            # LLM value extraction — convert facts to typed parameter values
+            extracted_values = await self._extract_z3_values_from_facts(
+                rule_json_data, all_facts, rule_description
+            )
+            logger.info(
+                f"Z3 rule_id='{rule_id}': LLM extracted values: {extracted_values}"
+            )
+
+            # Check if all required parameters have non-null values
+            required_params = [
+                p
+                for p in rule_json_data.get("parameters", [])
+                if p.get("required", True)
+            ]
+            missing_params = [
+                p.get("name")
+                for p in required_params
+                if extracted_values.get(p.get("name")) is None
+            ]
+
+            if missing_params:
+                logger.error(
+                    f"Z3 rule_id='{rule_id}': missing required parameters "
+                    f"{missing_params} after LLM value extraction. "
+                    f"Cannot complete Z3 validation (strict mode)."
+                )
+                return {
+                    "policy_type": policy_type,
+                    "rule": rule_description,
+                    "recommendation": "Information Not Found",
+                    "reasoning": (
+                        f"Z3 validation incomplete: could not extract values for "
+                        f"required parameters {missing_params} from the document. "
+                        f"The document may not contain the necessary data."
+                    ),
+                    "supporting_pages": [],
+                    "_z3_validated": True,
+                }
+
+            # Collect supporting pages from facts
+            supporting_pages = []
+            for fact in all_facts:
+                citation = fact.get("citation", "")
+                if citation:
+                    pages = str(citation).split(",")
+                    supporting_pages.extend([p.strip() for p in pages if p.strip()])
+            supporting_pages = sorted(
+                list(set(supporting_pages)),
+                key=lambda x: int(x) if x.isdigit() else 0,
+            )
+
+            # Run Z3 solver
+            verdict = self._run_z3_validation(
+                rule_json_data, extracted_values, supporting_pages
+            )
+            verdict["policy_type"] = policy_type
+            verdict["rule"] = rule_description
+
+            logger.info(
+                f"Z3 rule_id='{rule_id}' verdict: {verdict.get('recommendation')}"
+            )
+            return verdict
+
+        except Exception as e:
+            logger.error(
+                f"Unhandled error processing Z3 rule_id='{rule_id}': {e}",
+                exc_info=True,
+            )
+            return {
+                "policy_type": policy_type,
+                "rule": rule_description,
+                "recommendation": "Information Not Found",
+                "reasoning": f"Z3 validation error: {e}",
+                "supporting_pages": [],
+                "_z3_validated": True,
             }
 
     async def _process_z3_cross_section_rules(
@@ -841,117 +982,15 @@ class RuleValidationOrchestratorService:
             rule_description = rule_info["rule"]
             section_responses = rule_info["responses"]
 
-            logger.info(
-                f"Processing Z3 rule_id='{rule_id}' with "
-                f"{len(section_responses)} section responses"
+            verdict = await self._process_single_z3_rule(
+                compound_key,
+                rule_id,
+                policy_type,
+                rule_description,
+                section_responses,
+                config,
             )
-
-            # Collect all extracted facts from all sections
-            all_facts = self._collect_facts_across_sections(section_responses)
-            logger.info(
-                f"Z3 rule_id='{rule_id}': collected {len(all_facts)} facts "
-                f"from {len(section_responses)} sections"
-            )
-
-            if not all_facts:
-                logger.error(
-                    f"Z3 rule_id='{rule_id}': no facts extracted from any section. "
-                    f"Cannot validate (strict mode)."
-                )
-                z3_verdicts[compound_key] = {
-                    "recommendation": "Information Not Found",
-                    "reasoning": (
-                        "Z3 validation error: no facts were extracted from any "
-                        "document section for this rule. Ensure the document "
-                        "contains relevant data for the rule parameters."
-                    ),
-                    "supporting_pages": [],
-                    "_z3_validated": True,
-                }
-                continue
-
-            # Load RuleJSON from config (embedded inline)
-            rule_json_data = self._get_rule_json_from_config(
-                rule_id, config, policy_type
-            )
-            if not rule_json_data:
-                logger.error(
-                    f"RuleJSON not found for rule_id='{rule_id}' in config. "
-                    f"Generate RuleJSON in the Config Editor before using Z3 engine."
-                )
-                z3_verdicts[compound_key] = {
-                    "recommendation": "Information Not Found",
-                    "reasoning": (
-                        f"Z3 configuration error: RuleJSON (x-aws-idp-rule-json) "
-                        f"is missing for rule_id='{rule_id}'. Use the 'Generate "
-                        f"RuleJSON' button in the Config Editor to create it."
-                    ),
-                    "supporting_pages": [],
-                    "_z3_validated": True,
-                }
-                continue
-
-            # LLM value extraction — convert facts to typed parameter values
-            extracted_values = await self._extract_z3_values_from_facts(
-                rule_json_data, all_facts, rule_description
-            )
-            logger.info(
-                f"Z3 rule_id='{rule_id}': LLM extracted values: {extracted_values}"
-            )
-
-            # Check if all required parameters have non-null values
-            required_params = [
-                p
-                for p in rule_json_data.get("parameters", [])
-                if p.get("required", True)
-            ]
-            missing_params = [
-                p.get("name")
-                for p in required_params
-                if extracted_values.get(p.get("name")) is None
-            ]
-
-            if missing_params:
-                logger.error(
-                    f"Z3 rule_id='{rule_id}': missing required parameters "
-                    f"{missing_params} after LLM value extraction. "
-                    f"Cannot complete Z3 validation (strict mode)."
-                )
-                z3_verdicts[compound_key] = {
-                    "recommendation": "Information Not Found",
-                    "reasoning": (
-                        f"Z3 validation incomplete: could not extract values for "
-                        f"required parameters {missing_params} from the document. "
-                        f"The document may not contain the necessary data."
-                    ),
-                    "supporting_pages": [],
-                    "_z3_validated": True,
-                }
-                continue
-
-            # Collect supporting pages from facts
-            supporting_pages = []
-            for fact in all_facts:
-                citation = fact.get("citation", "")
-                if citation:
-                    pages = str(citation).split(",")
-                    supporting_pages.extend([p.strip() for p in pages if p.strip()])
-            supporting_pages = sorted(
-                list(set(supporting_pages)),
-                key=lambda x: int(x) if x.isdigit() else 0,
-            )
-
-            # Run Z3 solver
-            verdict = self._run_z3_validation(
-                rule_json_data, extracted_values, supporting_pages
-            )
-            verdict["policy_type"] = policy_type
-            verdict["rule"] = rule_description
             z3_verdicts[compound_key] = verdict
-
-            logger.info(
-                f"Z3 rule_id='{rule_id}' verdict: {verdict.get('recommendation')}"
-            )
 
         # Step 4: Update all_responses — replace Z3 rule responses with verdicts
         # Build a reverse lookup: (policy_type, rule_text) → rule_id for quick matching

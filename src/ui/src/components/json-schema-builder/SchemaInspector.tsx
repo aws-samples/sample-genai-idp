@@ -803,7 +803,7 @@ const SchemaInspector = ({
         )}
 
         {isRuleSchema && selectedAttribute[X_AWS_IDP_VALIDATION_ENGINE] === 'z3' && (
-          <RuleJsonSection selectedAttribute={selectedAttribute} onUpdate={onUpdate} />
+          <RuleJsonSection key={selectedAttributeName} selectedAttribute={selectedAttribute} onUpdate={onUpdate} />
         )}
 
         {!isRuleSchema && <MetadataFields attribute={selectedAttribute} onUpdate={onUpdate} />}

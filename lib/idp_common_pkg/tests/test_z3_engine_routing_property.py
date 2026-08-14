@@ -51,7 +51,7 @@ def rule_list_strategy(draw):
         )
         description = f"Rule {i}: {suffix}"
         engine = draw(engine_assignments)
-        rule_id = f"rule_{i}" if engine == "z3" else None
+        rule_id = f"rule_{i}" if engine == "z3" and draw(st.booleans()) else None
         rules.append({"description": description, "engine": engine, "rule_id": rule_id})
     return rules
 
@@ -188,9 +188,7 @@ class TestEngineRoutingCorrectness:
                 if r["engine"] == "z3" and r.get("rule_id")
             ]
             expected_llm_rules = [
-                r["description"]
-                for r in rules
-                if r["engine"] != "z3" or not r.get("rule_id")
+                r["description"] for r in rules if r["engine"] != "z3"
             ]
 
             # All Z3 rules should have been dispatched to _process_z3_fact_extraction
