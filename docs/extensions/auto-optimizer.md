@@ -7,6 +7,16 @@ The **Auto Optimizer** is a fully autonomous AI agentic system that optimizes yo
 
 ## Demo Video
 
+#### Non Technical
+
+**Duration**: ~1.45 minutes
+
+https://github.com/user-attachments/assets/57f70099-0909-4d13-ba8e-7f365b63eaa8
+
+
+
+#### Technical
+
 **Duration**: ~3.5 minutes
 
 https://github.com/user-attachments/assets/981ae354-bb5d-4613-bf01-ac17675be25b
