@@ -112,9 +112,6 @@ config_library/samples-manifest.json
 api-test-results/
 zap-reports/
 
-# Local Test Studio enhancement working files (specs, mockups, scoping docs — not for commit)
-test_studio_enhancement/
-
 # Local scratch / capture artifacts — never committed. Some contain customer
 # references from live-stack captures and must never reach a fork or upstream.
 .playwright-mcp/
