@@ -4,6 +4,12 @@
 """
 Z3 engine adapter for the IDP rule validation pipeline.
 
+NOTE: This module is used by the demo notebook (notebooks/examples/dual-engine-
+rule-validation.ipynb) for standalone Z3 validation. The production pipeline uses
+a different path: service.py (fact extraction) + orchestrator.py (LLM value
+extraction + Z3Validator directly). This adapter is NOT called by the deployed
+Lambda functions.
+
 Bridges the Z3-based ValidationSystem with the IDP Document model,
 producing results in the same format as the LLM-based engine so the
 orchestrator can consume them interchangeably.
@@ -306,8 +312,8 @@ class Z3EngineAdapter:
             if data:
                 logger.info(f"Z3 rule loaded from S3 cache: {key}")
                 return RuleJSON.from_dict(data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to load Z3 rule from S3 cache ({key}): {e}")
         return None
 
     def _save_to_s3(self, bucket, prefix, rule_description, rule_json):

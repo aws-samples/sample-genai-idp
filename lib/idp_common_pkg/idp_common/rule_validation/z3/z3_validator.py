@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """
 Z3-based constraint validator for business rule validation system.
 
@@ -358,8 +361,13 @@ class Z3Validator:
         """
         Parse an SMT-LIB constraint string into a Z3 expression.
 
-        This is a simplified parser that handles common SMT-LIB constructs.
-        It converts S-expression syntax to Z3 Python API calls.
+        Uses a hand-rolled recursive-descent parser instead of z3.parse_smt2_string
+        because the latter requires explicit sort/const declarations (declare-const,
+        set-logic) wrapping each expression. Our LLM-generated constraints are bare
+        S-expressions like "(>= x 10)" without preamble. The supported operator
+        subset (arithmetic, comparison, boolean, string equality) covers all
+        constraints the RuleTranslator generates. Unsupported operators surface as
+        "Information Not Found" at runtime.
 
         Args:
             constraint_str: SMT-LIB constraint string (e.g., "(>= x 10)")

@@ -1,3 +1,10 @@
+---
+title: "Z3 Symbolic Rule Validation Engine"
+---
+
+<!-- Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. -->
+<!-- SPDX-License-Identifier: MIT-0 -->
+
 # Z3 Dual-Engine Rule Validation
 
 ## Overview

@@ -1,5 +1,12 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """
 Data extraction component for Z3-based business rule validation system.
+
+NOTE: This module is used by the demo notebook and Z3EngineAdapter for path-based
+and LLM-assisted value extraction. The production pipeline uses orchestrator.py's
+_extract_z3_values_from_facts (a dedicated LLM call) instead of this extractor.
 
 This module implements the Data_Extractor component that extracts values from
 nested JSON documents using path mappings from Rule_JSON.

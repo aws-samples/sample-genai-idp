@@ -1,5 +1,12 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 """
 Validation System orchestrator for Z3-based business rule validation.
+
+NOTE: This module is used by the demo notebook and Z3EngineAdapter for standalone
+validation. The production pipeline uses orchestrator.py's _run_z3_validation
+(which calls Z3Validator directly) instead of this system.
 
 This module provides the ValidationSystem class that orchestrates the complete
 validation workflow:
