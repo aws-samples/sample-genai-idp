@@ -706,6 +706,9 @@ def _harvest_active_label_job(test_set_id, meta):
     Labels are harvested on read, so every caller that displays a job must drive
     the harvest or the job never progresses. Best-effort: a harvest failure must
     not fail the queue, which still works for already-labeled documents.
+
+    All in-flight jobs share one time budget, since the caller is a single request
+    and copying results is S3-bound.
     """
     # Every non-terminal job, not just the one the set's pointer names: a
     # one-document re-extract repoints it, and harvesting only the pointer would
@@ -722,10 +725,11 @@ def _harvest_active_label_job(test_set_id, meta):
             {"PK": f"testset#{test_set_id}", "SK": _label_job_sk(pointer)}
         )
 
+    deadline = time.monotonic() + HARVEST_TIME_BUDGET_SECONDS
     harvested = []
     for job in jobs:
         try:
-            harvested.append(_harvest_label_job(job))
+            harvested.append(_harvest_label_job(job, deadline=deadline))
         except Exception as e:  # noqa: BLE001
             logger.error(
                 f"Queue harvest failed for labeling job {job.get('jobId')}: {e}"
@@ -1036,7 +1040,11 @@ def get_draft_label_job(args):
     if job.get("status") in ("COMPLETED", "FAILED"):
         return _label_job_to_result(job)
 
-    return _label_job_to_result(_harvest_label_job(job))
+    return _label_job_to_result(
+        _harvest_label_job(
+            job, deadline=time.monotonic() + HARVEST_TIME_BUDGET_SECONDS
+        )
+    )
 
 
 def _walk_confidence(explainability_info):
@@ -1544,6 +1552,11 @@ SAMPLING_TIME_BUDGET_SECONDS = 25
 # document, so the bound has to be on reads rather than on usable results.
 MAX_SECTIONS_FOR_FIELD_SAMPLE = 40
 
+# Shared by every labeling job a single request harvests. Copying results is
+# several S3 calls per section, so a large set cannot finish in one pass; stopping
+# short leaves the job RUNNING and the next poll continues.
+HARVEST_TIME_BUDGET_SECONDS = 20
+
 
 def _collect_doc_confidences(test_set_id):
     """Per-document minimum confidence, plus observed doc shape for the effort model.
@@ -1672,7 +1685,7 @@ def _count_baseline_fields(bucket, key):
     return count(inference) if inference else None
 
 
-def _harvest_label_job(job):
+def _harvest_label_job(job, deadline=None):
     """Copy finished pipeline results into the test set's baseline as drafts.
 
     For each of the run's documents whose processing has completed, read the
@@ -1684,6 +1697,14 @@ def _harvest_label_job(job):
     Idempotent and non-destructive: a document already carrying a human-reviewed
     label is skipped, so re-harvesting (or re-running a job) never overwrites
     confirmed ground truth.
+
+    Documents already copied are recorded on the job and not re-read. Without
+    that, every poll re-did the whole set — several S3 reads and writes per
+    section — so a large set grew slower to harvest the closer it got to done,
+    and eventually could not finish inside the resolver timeout. ``deadline``
+    (a :func:`time.monotonic` value) stops the pass early; the unfinished
+    documents stay pending, so the job remains RUNNING and the next poll resumes
+    where this one stopped.
     """
     test_set_id = job["testSetId"]
     job_id = job["jobId"]
@@ -1701,9 +1722,19 @@ def _harvest_label_job(job):
     wanted = set(job.get("objectKeys") or [])
     files = [f for f in (run.get("Files") or []) if not wanted or f in wanted]
 
-    labeled = 0
+    done = set(job.get("harvestedFiles") or [])
     pending = 0
+    out_of_time = False
     for file_name in files:
+        if file_name in done:
+            continue
+        if deadline is not None and time.monotonic() > deadline:
+            # Remaining documents are pending, not lost: the job stays RUNNING and
+            # the next poll picks them up.
+            out_of_time = True
+            pending += 1
+            continue
+
         doc = tracking_table.get_item(
             Key={"PK": f"doc#{job_id}/{file_name}", "SK": "none"}
         ).get("Item")
@@ -1712,14 +1743,13 @@ def _harvest_label_job(job):
             continue
 
         try:
-            if _write_draft_labels_for_doc(
+            _write_draft_labels_for_doc(
                 test_set_bucket,
                 test_set_id,
                 file_name,
                 doc.get("Sections") or [],
                 config_version=job.get("configVersion") or doc.get("ConfigVersion"),
-            ):
-                labeled += 1
+            )
             # TestSetId on the pipeline document is how completeSectionReview knows
             # to write back to the baseline, tag the label reviewed-human and record
             # the curve observation; without it the save reports success and does
@@ -1730,15 +1760,23 @@ def _harvest_label_job(job):
                     UpdateExpression="SET TestSetId = :tsid",
                     ExpressionAttributeValues={":tsid": test_set_id},
                 )
+            # Recorded only once both steps land, so a partial failure is retried.
+            # Writing no sections still counts: that means every section was
+            # already human-owned, which needs no draft.
+            done.add(file_name)
         except Exception as e:  # noqa: BLE001 — one bad doc must not fail the job
+            # Deliberately not counted pending: a document that fails every time
+            # would hold the job RUNNING forever. It is left out of the harvested
+            # set, so it retries while the job is in flight and then stops.
             logger.error(
                 f"Draft labeling: failed to harvest '{file_name}' for job {job_id}: {e}"
             )
 
     status = "RUNNING" if pending else "COMPLETED"
+    labeled = len(done)
     now = datetime.utcnow().isoformat() + "Z"
-    update_expr = "SET #st = :s, labeled = :n"
-    expr_values = {":s": status, ":n": labeled}
+    update_expr = "SET #st = :s, labeled = :n, harvestedFiles = :h"
+    expr_values = {":s": status, ":n": labeled, ":h": sorted(done)}
     if status == "COMPLETED":
         update_expr += ", completedAt = :c"
         expr_values[":c"] = now
@@ -1765,9 +1803,17 @@ def _harvest_label_job(job):
     logger.info(
         f"Draft labeling job {job_id}: labeled={labeled} pending={pending} "
         f"status={status}"
+        + (
+            f" (stopped after {HARVEST_TIME_BUDGET_SECONDS}s; resuming on the "
+            "next poll)"
+            if out_of_time
+            else ""
+        )
     )
     updated = dict(job)
-    updated.update({"status": status, "labeled": labeled})
+    updated.update(
+        {"status": status, "labeled": labeled, "harvestedFiles": sorted(done)}
+    )
     if status == "COMPLETED":
         updated["completedAt"] = now
     return updated
@@ -1943,7 +1989,6 @@ def remove_documents_from_test_set(args):
         raise Exception(f"Test set '{test_set_id}' not found")
 
     test_set_bucket = os.environ["TEST_SET_BUCKET"]
-    s3_client = boto3.client("s3")
 
     removed = 0
     for file_name in file_names:
@@ -2455,7 +2500,6 @@ def get_test_sets():
     # Scan TestSetBucket for direct uploads
     try:
         test_set_bucket = os.environ["TEST_SET_BUCKET"]
-        s3_client = boto3.client("s3")
 
         # Track which test sets still exist in S3
         s3_test_sets = set()

@@ -696,7 +696,10 @@ def estimate_for_target(
     total_expected_errors = sum(per_doc_error)
     baseline_error = total_expected_errors / total_fields if total_fields > 0 else 0.0
 
-    # Residual error after reviewing the N worst documents, for every N.
+    # Residual error after reviewing the N worst documents, for every N. One point
+    # per document, so the series is as long as the caller's confidence sample —
+    # bounded there, since docsToReview indexes into it and downsampling here would
+    # move the target marker off the curve.
     burndown: List[Dict[str, Any]] = []
     residual_by_n: List[float] = []
     remaining = total_expected_errors

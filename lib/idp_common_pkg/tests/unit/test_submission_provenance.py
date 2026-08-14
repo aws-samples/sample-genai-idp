@@ -164,19 +164,46 @@ class TestBackfillRetypesLegacyTestDocuments:
     def test_retypes_a_document_with_a_test_run_key(self):
         """Documents predating tagging carry no metadata, only a key shape.
 
-        The copier writes into "<testSetId>-<YYYYMMDD>-<HHMMSS>/", so that is the
-        only available signal for the rows already in the table.
+        The copier writes into "<testSetId>-<YYYYMMDD>-<HHMMSS>/", so that shape
+        plus a matching test-run record is the only available signal for the rows
+        already in the table.
         """
         module = _load_backfill_worker()
         item = {"ItemType": "document"}
-        updates = module._determine_updates(item, "doc#my-set-20260806-120000/a.pdf")
+        updates = module._determine_updates(
+            item, "doc#my-set-20260806-120000/a.pdf", lambda run_id: True
+        )
         assert updates.get("ItemType") == "test-document"
 
     def test_leaves_an_ordinary_upload_alone(self):
         module = _load_backfill_worker()
         item = {"ItemType": "document"}
-        updates = module._determine_updates(item, "doc#invoice.pdf")
+        updates = module._determine_updates(
+            item, "doc#invoice.pdf", lambda run_id: True
+        )
         assert "ItemType" not in updates
+
+    def test_a_timestamped_folder_with_no_test_run_is_left_visible(self):
+        """The key shape is not exclusive to test runs.
+
+        Nothing stops a customer from organising an input bucket into
+        "<name>-<date>-<time>/" folders, and retyping a real upload removes it from
+        the Document List. Without a test-run record to confirm the prefix, the
+        document stays as it is.
+        """
+        module = _load_backfill_worker()
+        item = {"ItemType": "document"}
+        updates = module._determine_updates(
+            item, "doc#invoices-20260806-120000/a.pdf", lambda run_id: False
+        )
+        assert "ItemType" not in updates
+        # Same when no verifier is available at all.
+        assert (
+            module._determine_updates(item, "doc#invoices-20260806-120000/a.pdf").get(
+                "ItemType"
+            )
+            is None
+        )
 
     def test_metadata_is_preferred_over_the_key_shape(self):
         """Once tagging shipped the attributes are definitive."""
@@ -189,8 +216,25 @@ class TestBackfillRetypesLegacyTestDocuments:
         """Idempotent: a second backfill pass must be a no-op."""
         module = _load_backfill_worker()
         item = {"ItemType": "test-document", "SubmissionSource": "test-studio"}
-        updates = module._determine_updates(item, "doc#my-set-20260806-120000/a.pdf")
+        updates = module._determine_updates(
+            item, "doc#my-set-20260806-120000/a.pdf", lambda run_id: True
+        )
         assert "ItemType" not in updates
+
+    def test_the_run_verifier_reads_each_run_once(self):
+        """One run covers many documents; the check must not be per item."""
+        module = _load_backfill_worker()
+        reads = []
+
+        class FakeTable:
+            def get_item(self, **kwargs):
+                reads.append(kwargs["Key"]["PK"])
+                return {"Item": {"PK": kwargs["Key"]["PK"]}}
+
+        exists = module._test_run_verifier(FakeTable())
+        assert exists("my-set-20260806-120000") is True
+        assert exists("my-set-20260806-120000") is True
+        assert reads == ["testrun#my-set-20260806-120000"]
 
 
 def test_resolver_and_library_agree_on_item_type_values():

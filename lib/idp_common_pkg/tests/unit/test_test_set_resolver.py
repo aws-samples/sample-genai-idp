@@ -1086,9 +1086,13 @@ class TestTestSetResolver:
         os.environ, {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "ts-bucket"}
     )
     def test_remove_documents_deletes_input_and_baseline_and_recounts(self):
+        # Patches the module-level client, which is the one configured for the
+        # private-VPC endpoint; a locally-constructed client would bypass it.
+        s3 = MagicMock()
         with (
             patch.object(test_set_index.db_client, "get_item") as mock_get,
             patch.object(test_set_index, "boto3") as mock_boto3,
+            patch.object(test_set_index, "s3_client", s3),
             patch.object(test_set_index, "_validate_test_set_files") as mock_validate,
         ):
             mock_get.return_value = {
@@ -1097,7 +1101,6 @@ class TestTestSetResolver:
                 "status": "COMPLETED",
                 "createdAt": "2026-01-01T00:00:00Z",
             }
-            s3 = MagicMock()
             # baseline folder for doc.pdf has one nested result.json
             paginator = MagicMock()
             paginator.paginate.return_value = [
@@ -1559,6 +1562,125 @@ class TestTestSetResolver:
         )
         assert result["status"] == "RUNNING"
         assert result["labeled"] == 1
+
+    def test_harvest_does_not_re_read_documents_it_already_copied(self, labeling_env):
+        """Each poll must only do the work that is new.
+
+        Harvesting is several S3 calls per section, and every caller that shows a
+        job drives it. Re-copying finished documents made a large set slower to
+        harvest the closer it got to done.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        uris = {
+            name: _seed_pipeline_result(
+                s3, f"ts1-run/{name}/sections/1/result.json", {"vendor": name}
+            )
+            for name in ("a.pdf", "b.pdf")
+        }
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf", "b.pdf"],
+            {name: [{"Id": "1", "OutputJSONUri": uri}] for name, uri in uris.items()},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 2,
+                "labeled": 0,
+                # a.pdf was copied by an earlier poll.
+                "harvestedFiles": ["a.pdf"],
+            }
+        )
+
+        read_keys = []
+        real_get = test_set_index.s3_client.get_object
+
+        def spy(**kwargs):
+            read_keys.append(kwargs.get("Key"))
+            return real_get(**kwargs)
+
+        test_set_index.s3_client.get_object = spy
+        try:
+            result = test_set_index.get_draft_label_job(
+                {"testSetId": "ts1", "jobId": "ts1-run"}
+            )
+        finally:
+            test_set_index.s3_client.get_object = real_get
+
+        assert not any("a.pdf" in key for key in read_keys), read_keys
+        assert any("b.pdf" in key for key in read_keys), read_keys
+        # Progress still counts the whole set, not just this pass.
+        assert result["status"] == "COMPLETED"
+        assert result["labeled"] == 2
+        job = table.get_item(Key={"PK": "testset#ts1", "SK": "labeljob#ts1-run"})[
+            "Item"
+        ]
+        assert sorted(job["harvestedFiles"]) == ["a.pdf", "b.pdf"]
+
+    def test_harvest_stops_at_its_deadline_and_stays_resumable(self, labeling_env):
+        """A set too large for one pass must make partial progress, not time out.
+
+        The resolver has 60s. Stopping short has to leave the job RUNNING with the
+        finished documents recorded, so the next poll continues rather than
+        restarting.
+        """
+        table, s3 = labeling_env
+        names = ["a.pdf", "b.pdf", "c.pdf"]
+        _seed_test_set(table, "ts1", fileCount=len(names))
+        sections = {}
+        for name in names:
+            uri = _seed_pipeline_result(
+                s3, f"ts1-run/{name}/sections/1/result.json", {"vendor": name}
+            )
+            sections[name] = [{"Id": "1", "OutputJSONUri": uri}]
+        _seed_completed_run(table, "ts1-run", "ts1", names, sections)
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": len(names),
+                "labeled": 0,
+            }
+        )
+        job = table.get_item(Key={"PK": "testset#ts1", "SK": "labeljob#ts1-run"})[
+            "Item"
+        ]
+
+        # The budget runs out after the first document.
+        ticks = []
+
+        def clock():
+            ticks.append(None)
+            return 0.0 if len(ticks) == 1 else 100.0
+
+        with patch.object(test_set_index.time, "monotonic", clock):
+            first = test_set_index._harvest_label_job(job, deadline=1.0)
+
+        assert first["status"] == "RUNNING"
+        assert first["labeled"] == 1
+        assert first["harvestedFiles"] == ["a.pdf"]
+
+        # No deadline on the follow-up: it finishes the remaining two.
+        second = test_set_index._harvest_label_job(
+            table.get_item(Key={"PK": "testset#ts1", "SK": "labeljob#ts1-run"})["Item"]
+        )
+        assert second["status"] == "COMPLETED"
+        assert second["labeled"] == len(names)
+        for name in names:
+            s3.head_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+            )
 
     def test_harvest_marks_the_job_failed_when_the_run_fails(self, labeling_env):
         table, _ = labeling_env
@@ -2497,7 +2619,7 @@ class TestTestSetResolver:
         harvested = []
         real = test_set_index._harvest_label_job
 
-        def spy(job):
+        def spy(job, **_kwargs):
             harvested.append(job.get("jobId"))
             return job
 

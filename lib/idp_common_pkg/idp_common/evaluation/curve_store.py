@@ -175,6 +175,14 @@ class CurveStore:
         Observations are additive and cannot be individually un-folded, so
         discarding and rebuilding is the only correction path when ground truth
         turns out to have been wrong.
+
+        Known limitation: this clears one set's curve, not the contribution that
+        set already made to the global prior. Bad observations therefore keep a
+        small residual influence on other sets — bounded, because the prior is only
+        a fallback for bins a set has not measured itself, and it shrinks as other
+        sets contribute. Removing it exactly would mean storing per-set
+        contributions to the prior, which is not worth the write amplification;
+        rebuild the prior from scratch if it is ever badly skewed.
         """
         self._table.delete_item(
             Key={
@@ -309,6 +317,14 @@ def observations_from_baseline_review(
     Only fields present in the drafted result with a recorded confidence
     contribute; a field the reviewer added had no prediction to be right or wrong
     about.
+
+    Known limitation: list members are keyed by position, so inserting or deleting
+    a row shifts every path after it and those fields compare against the wrong
+    neighbour — a reviewer who deletes one spurious transaction can look like they
+    corrected the whole remaining table. It costs accuracy in the pessimistic
+    direction only (over-counting errors, never under-counting), and a
+    position-independent key would need a stable per-row identity the extraction
+    result does not carry.
     """
     if not before or not after:
         return []

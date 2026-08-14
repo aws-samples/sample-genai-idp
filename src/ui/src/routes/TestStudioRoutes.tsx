@@ -9,7 +9,6 @@ import TestSetDocumentDetail from '../components/test-studio/TestSetDocumentDeta
 import AnnotationWorkspace from '../components/test-studio/AnnotationWorkspace';
 import AnnotationQueueLanding from '../components/test-studio/AnnotationQueueLanding';
 import GenAIIDPTopNavigation from '../components/genai-idp-top-navigation';
-import GroundTruthFlowPreview from '../components/test-studio/preview/GroundTruthFlowPreview';
 
 const TestStudioRoutes = (): React.JSX.Element => {
   return (
@@ -51,17 +50,6 @@ const TestStudioRoutes = (): React.JSX.Element => {
           <div>
             <GenAIIDPTopNavigation />
             <TestSetDetail />
-          </div>
-        }
-      />
-      {/* Clickable UX prototype (fixture data, no backend) for reviewing the
-          ground-truth test-set flow before full implementation. */}
-      <Route
-        path="preview"
-        element={
-          <div>
-            <GenAIIDPTopNavigation />
-            <GroundTruthFlowPreview />
           </div>
         }
       />

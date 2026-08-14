@@ -115,6 +115,8 @@ def lambda_handler(event, context):
     if exclusive_start_key:
         scan_kwargs["ExclusiveStartKey"] = exclusive_start_key
 
+    run_exists = _test_run_verifier(table)
+
     while True:
         # Check if we're approaching Lambda timeout
         remaining_ms = context.get_remaining_time_in_millis()
@@ -148,7 +150,7 @@ def lambda_handler(event, context):
             pk = item.get("PK", "")
             
             # Determine what updates are needed
-            updates = _determine_updates(item, pk)
+            updates = _determine_updates(item, pk, run_exists)
             
             if not updates:
                 stats["skipped"] += 1
@@ -183,22 +185,53 @@ def lambda_handler(event, context):
     return stats
 
 
-_TEST_RUN_KEY_RE = re.compile(r"^doc#[^/]+-\d{8}-\d{6}/")
+_TEST_RUN_KEY_RE = re.compile(r"^doc#([^/]+-\d{8}-\d{6})/")
 
 
-def _looks_like_test_run_document(pk, item):
+def _looks_like_test_run_document(pk, item, run_exists=None):
     """True when this document item was submitted by a test run.
 
-    SubmissionSource/TestSetId are definitive when present. Key shape
-    ("<testSetId>-<YYYYMMDD>-<HHMMSS>/", written by the test file copier) is the
-    only signal available for documents stored before those were recorded.
+    SubmissionSource/TestSetId are definitive when present. For documents stored
+    before those were recorded, the only signal is key shape
+    ("<testSetId>-<YYYYMMDD>-<HHMMSS>/", written by the test file copier) — and a
+    real upload can share it, since nothing stops a customer from organising a
+    bucket into timestamped folders. Retyping one hides it from the Document List
+    entirely, which is worse than leaving a legacy test document visible there, so
+    the shape alone is not enough: ``run_exists`` must confirm the prefix names an
+    actual test run. Without a verifier the document is left as it is.
     """
     if item.get("SubmissionSource") or item.get("TestSetId"):
         return True
-    return bool(_TEST_RUN_KEY_RE.match(pk))
+    match = _TEST_RUN_KEY_RE.match(pk)
+    if not match or run_exists is None:
+        return False
+    return bool(run_exists(match.group(1)))
 
 
-def _determine_updates(item, pk):
+def _test_run_verifier(table):
+    """Confirm a run id has a test-run record, memoised across the segment.
+
+    One run covers many documents, so this is a handful of reads per scan rather
+    than one per item.
+    """
+    seen = {}
+
+    def exists(run_id):
+        if run_id not in seen:
+            try:
+                seen[run_id] = "Item" in table.get_item(
+                    Key={"PK": f"testrun#{run_id}", "SK": "metadata"},
+                    ProjectionExpression="PK",
+                )
+            except ClientError as e:
+                logger.warning(f"Could not verify test run '{run_id}': {e}")
+                seen[run_id] = False
+        return seen[run_id]
+
+    return exists
+
+
+def _determine_updates(item, pk, run_exists=None):
     """
     Determine which attributes need to be set on this item.
     Returns a dict of {attribute_name: value} or empty dict if no updates needed.
@@ -216,7 +249,7 @@ def _determine_updates(item, pk):
     # 1b. Retype test-run submissions: without this they carry ItemType="document"
     # and show up in the Document List alongside real uploads.
     if item.get("ItemType") == "document" or updates.get("ItemType") == "document":
-        if _looks_like_test_run_document(pk, item):
+        if _looks_like_test_run_document(pk, item, run_exists):
             updates["ItemType"] = "test-document"
 
     # 2. Check if HITLPendingReview needs to be set (only for documents)
