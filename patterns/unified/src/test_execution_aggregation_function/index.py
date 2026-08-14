@@ -133,10 +133,47 @@ def _record_confidence_curve(
         if not test_set_id:
             return  # Not a test-set run — nothing to attribute the curve to.
 
+        # A run scored against labels the same config drafted measures the config
+        # against itself: extraction reproduces the drafted baseline almost exactly,
+        # the bins fold in as near-perfect accuracy, and the set can report "99%
+        # accuracy, measured on this test set" for labels no human ever checked.
+        # That is precisely the false confidence the quality tiers exist to prevent,
+        # so these observations are refused rather than recorded.
+        run_config = run.get("ConfigVersion")
+        test_set = (
+            table.get_item(Key={"PK": f"testset#{test_set_id}", "SK": "metadata"}).get(
+                "Item"
+            )
+            or {}
+        )
+        # The drafting job id is itself a test run id, so its record carries the
+        # config version the runner resolved — no extra field to keep in sync.
+        drafting_run_id = test_set.get("labelJobId")
+        drafted_by = None
+        if drafting_run_id and drafting_run_id != test_run_id:
+            drafted_by = (
+                table.get_item(
+                    Key={"PK": f"testrun#{drafting_run_id}", "SK": "metadata"}
+                ).get("Item")
+                or {}
+            ).get("ConfigVersion")
+        if (
+            test_set.get("labelState") == "draft"
+            and run_config
+            and drafted_by
+            and run_config == drafted_by
+        ):
+            logger.info(
+                f"Skipping confidence-curve update for {test_set_id}: run scored "
+                f"config '{run_config}' against labels that config drafted, which "
+                "would measure the config against itself"
+            )
+            return
+
         from idp_common.evaluation.curve_store import CurveStore
 
         accepted = CurveStore(table).add_ece_bins(
-            test_set_id, bins, config_version=run.get("ConfigVersion")
+            test_set_id, bins, config_version=run_config
         )
         logger.info(
             f"Recorded {accepted} confidence-curve observation(s) for test set "

@@ -1558,8 +1558,10 @@ type Query @aws_cognito_user_pools @aws_iam {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getDraftLabelJob(testSetId: String!, jobId: String!): DraftLabelJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Annotator included so the workspace can show what their review is buying; the
+  # resolver additionally enforces allowedTestSets per set.
   estimateReviewEffort(testSetId: String!, targetAccuracy: Float, configVersion: String): ReviewEffortEstimate
-    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Annotator"])
   # Annotator is included so a scoped annotator can read their own queue; the
   # resolver additionally requires the test set to be in their allowedTestSets,
   # so group membership alone grants nothing.

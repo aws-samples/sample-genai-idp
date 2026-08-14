@@ -376,7 +376,9 @@ operations:
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: { testSetId: "nonexistent-test-set", jobId: "__nope__" }
   estimateReviewEffort:
-    groups: [Admin, Author]
+    # Annotator reads it for their own queue's "what review is buying" panel; the
+    # resolver additionally enforces allowedTestSets per set.
+    groups: [Admin, Author, Annotator]
     kind: read
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: { testSetId: "nonexistent-test-set" }

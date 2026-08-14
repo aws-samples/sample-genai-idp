@@ -46,6 +46,9 @@ def review_env():
     """The review Lambda wired to a real (moto) table and bucket."""
     env = {
         "TRACKING_TABLE_NAME": "tracking",
+        # build_document_response goes through idp_common's DynamoDBClient, which
+        # reads TRACKING_TABLE rather than the Lambda's TRACKING_TABLE_NAME.
+        "TRACKING_TABLE": "tracking",
         "TEST_SET_BUCKET": "test-set-bucket",
         "OUTPUT_BUCKET": "output-bucket",
         "AWS_DEFAULT_REGION": "us-east-1",
@@ -235,6 +238,63 @@ class TestCurveFeedback:
         from idp_common.evaluation.curve_store import CurveStore
 
         assert CurveStore(table).get_curve("ts1").total_observations == 0
+
+
+class TestClaimExclusivity:
+    """The collaborative queue depends on a claim being exclusive, not advisory."""
+
+    def _seed(self, table, s3):
+        _seed_review_doc(table, s3)
+
+    def test_second_claimant_loses(self, review_env):
+        """Regression: claim_review read the owner then wrote unconditionally, so
+        two annotators clicking Claim concurrently both succeeded and both edited
+        the same document. The write is now conditional."""
+        module, table, s3 = review_env
+        self._seed(table, s3)
+
+        module.claim_review("run1/a.pdf", "alice", "alice@example.com")
+
+        # Bob's read-then-write would previously have overwritten Alice's claim.
+        with pytest.raises(ValueError, match="already claimed"):
+            module.claim_review("run1/a.pdf", "bob", "bob@example.com")
+
+        item = table.get_item(Key={"PK": "doc#run1/a.pdf", "SK": "none"})["Item"]
+        assert item["HITLReviewOwner"] == "alice"
+
+    def test_message_names_the_winner_so_the_ui_can_skip_on(self, review_env):
+        """AnnotationWorkspace matches on 'already claimed' to advance to the next
+        document rather than dead-ending, so the phrasing is load-bearing."""
+        module, table, s3 = review_env
+        self._seed(table, s3)
+        module.claim_review("run1/a.pdf", "alice", "alice@example.com")
+
+        with pytest.raises(ValueError) as exc:
+            module.claim_review("run1/a.pdf", "bob", "bob@example.com")
+        assert "already claimed" in str(exc.value)
+        assert "alice" in str(exc.value)
+
+    def test_reclaiming_your_own_document_still_works(self, review_env):
+        """Re-opening a document you already hold must not be treated as a race."""
+        module, table, s3 = review_env
+        self._seed(table, s3)
+        module.claim_review("run1/a.pdf", "alice", "alice@example.com")
+        module.claim_review("run1/a.pdf", "alice", "alice@example.com")
+
+        item = table.get_item(Key={"PK": "doc#run1/a.pdf", "SK": "none"})["Item"]
+        assert item["HITLReviewOwner"] == "alice"
+
+    def test_a_released_document_can_be_claimed_again(self, review_env):
+        """Release blanks the owner; the condition must accept an empty string as
+        unclaimed, not just a missing attribute."""
+        module, table, s3 = review_env
+        self._seed(table, s3)
+        module.claim_review("run1/a.pdf", "alice", "alice@example.com")
+        module.release_review("run1/a.pdf", "alice", "alice@example.com")
+        module.claim_review("run1/a.pdf", "bob", "bob@example.com")
+
+        item = table.get_item(Key={"PK": "doc#run1/a.pdf", "SK": "none"})["Item"]
+        assert item["HITLReviewOwner"] == "bob"
 
 
 class TestConfirmWithoutEdits:

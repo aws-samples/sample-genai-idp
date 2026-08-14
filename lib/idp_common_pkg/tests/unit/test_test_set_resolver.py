@@ -2386,6 +2386,130 @@ class TestTestSetResolver:
         assert written["labelSource"] == "draft-machine"
         assert written["document_class"]["type"] == "bank-check"
 
+    def test_reextract_leaves_other_documents_reviewable(self, labeling_env):
+        """Regression: re-extracting one document disabled annotation for the set.
+
+        Review keys are ``{runId}/{filename}``. Re-extract runs as a one-document
+        labeling job, and the set carried a single labelJobId that the queue used
+        for every document — so after one Annotator used "fix class & re-extract",
+        every OTHER unreviewed document resolved through that one-document run,
+        found no pipeline copy, and reported "not ready to annotate". That defeats
+        the collaborative queue this exists to serve, and it is reachable by an
+        Annotator in the normal flow.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=3)
+        names = ["a.pdf", "b.pdf", "c.pdf"]
+        for name in names:
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": "draft-machine",
+                        "explainability_info": [{"f": {"confidence": 0.5}}],
+                        "inference_result": {"f": "v"},
+                    }
+                ).encode(),
+            )
+
+        # A full labeling run covered all three, and its pipeline copies exist.
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#run-full",
+                "jobId": "run-full",
+                "status": "COMPLETED",
+                "objectKeys": names,
+                "createdAt": "2026-01-01T00:00:00Z",
+            }
+        )
+        table.update_item(
+            Key={"PK": "testset#ts1", "SK": "metadata"},
+            UpdateExpression="SET labelJobId = :j",
+            ExpressionAttributeValues={":j": "run-full"},
+        )
+        for name in names:
+            table.put_item(Item={"PK": f"doc#run-full/{name}", "SK": "none"})
+
+        # Now a.pdf is re-extracted: a one-document job, with its own copy.
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#run-one",
+                "jobId": "run-one",
+                "status": "COMPLETED",
+                "objectKeys": ["a.pdf"],
+                "createdAt": "2026-01-02T00:00:00Z",
+            }
+        )
+        table.put_item(Item={"PK": "doc#run-one/a.pdf", "SK": "none"})
+        table.update_item(
+            Key={"PK": "testset#ts1", "SK": "metadata"},
+            UpdateExpression="SET labelJobId = :j",
+            ExpressionAttributeValues={":j": "run-one"},
+        )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        by_key = {d["objectKey"]: d for d in result["documents"]}
+
+        # The re-extracted document points at its newest run...
+        assert by_key["a.pdf"]["reviewObjectKey"] == "run-one/a.pdf"
+        # ...and its neighbours keep the run that actually produced their copies.
+        for name in ("b.pdf", "c.pdf"):
+            assert by_key[name]["reviewObjectKey"] == f"run-full/{name}", (
+                f"{name} lost its review key after an unrelated re-extract"
+            )
+            assert by_key[name]["available"] is True
+
+    def test_harvest_covers_a_run_the_pointer_no_longer_names(self, labeling_env):
+        """A one-document re-extract must not orphan a full run still in flight.
+
+        Harvesting only the job the set's pointer names left the remaining
+        documents of an in-progress full run permanently unharvested.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        for sk, job_id, keys, created in (
+            ("labeljob#run-full", "run-full", ["a.pdf"], "2026-01-01T00:00:00Z"),
+            ("labeljob#run-one", "run-one", ["a.pdf"], "2026-01-02T00:00:00Z"),
+        ):
+            table.put_item(
+                Item={
+                    "PK": "testset#ts1",
+                    "SK": sk,
+                    "jobId": job_id,
+                    "status": "RUNNING",
+                    "objectKeys": keys,
+                    "createdAt": created,
+                    "total": 1,
+                    "labeled": 0,
+                }
+            )
+        table.update_item(
+            Key={"PK": "testset#ts1", "SK": "metadata"},
+            UpdateExpression="SET labelJobId = :j",
+            ExpressionAttributeValues={":j": "run-one"},
+        )
+
+        harvested = []
+        real = test_set_index._harvest_label_job
+
+        def spy(job):
+            harvested.append(job.get("jobId"))
+            return job
+
+        test_set_index._harvest_label_job = spy
+        try:
+            meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
+            test_set_index._harvest_active_label_job("ts1", meta)
+        finally:
+            test_set_index._harvest_label_job = real
+
+        assert set(harvested) == {"run-full", "run-one"}, harvested
+
     def test_reextract_never_demotes_authored_ground_truth(self, labeling_env):
         """Regression: re-extraction must not demote a supplied verified label.
 

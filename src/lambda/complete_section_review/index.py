@@ -662,17 +662,37 @@ def claim_review(object_key, username="", user_email=""):
     if current_owner and current_owner != username:
         raise ValueError(f"Document is already claimed by {current_owner}")
 
-    # Update Review Status and review owner directly in DynamoDB
-    # This avoids re-serializing metering data which could cause issues
-    table.update_item(
-        Key={"PK": f"doc#{object_key}", "SK": "none"},
-        UpdateExpression="SET HITLStatus = :status, HITLReviewOwner = :owner, HITLReviewOwnerEmail = :email",
-        ExpressionAttributeValues={
-            ":status": "InProgress",
-            ":owner": username,
-            ":email": user_email,
-        },
-    )
+    # Conditional, so the claim is exclusive rather than advisory. The read above
+    # cannot be: two annotators clicking Claim at the same moment both pass it and
+    # both write, and the collaborative queue is exactly the feature that depends
+    # on only one winning. Updating in place (rather than via the document model)
+    # also avoids re-serializing metering data.
+    try:
+        table.update_item(
+            Key={"PK": f"doc#{object_key}", "SK": "none"},
+            UpdateExpression="SET HITLStatus = :status, HITLReviewOwner = :owner, HITLReviewOwnerEmail = :email",
+            ConditionExpression=(
+                "attribute_not_exists(HITLReviewOwner) OR HITLReviewOwner = :owner "
+                "OR HITLReviewOwner = :empty"
+            ),
+            ExpressionAttributeValues={
+                ":status": "InProgress",
+                ":owner": username,
+                ":email": user_email,
+                ":empty": "",
+            },
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        # Lost the race. Re-read so the message names the actual winner, and phrase
+        # it the way the read-path check does — the UI matches on "already claimed"
+        # to skip to the next document instead of dead-ending.
+        current = (
+            table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"}).get("Item")
+            or {}
+        )
+        winner = current.get("HITLReviewOwner") or "another reviewer"
+        logger.info(f"Claim race lost on {object_key}: already claimed by {winner}")
+        raise ValueError(f"Document is already claimed by {winner}") from None
 
     logger.info(
         f"Review claimed for document {object_key} by {username}, HITLStatus set to InProgress"

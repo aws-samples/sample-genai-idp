@@ -18,10 +18,8 @@ from idp_common.evaluation.confidence_curve import (  # type: ignore
 from idp_common.evaluation.curve_store import CurveStore  # type: ignore
 from idp_common.s3 import find_matching_files  # type: ignore
 from idp_common.testset_scope import (  # type: ignore
-    TestSetAccessDenied,
     assert_can_access_test_set,
     caller_email,
-    visible_test_sets,
 )
 
 # Constants
@@ -83,6 +81,11 @@ ANNOTATOR_ALLOWED_FIELDS = (
     "getAnnotationQueue",
     "getTestSetDocuments",
     "reextractTestSetDocument",
+    # The workspace shows annotators what their review is buying (accuracy now vs
+    # after, evidence count, quality tier). Without this the call 403s on every
+    # annotator page load and the panel is silently absent for the role it exists
+    # for. Per-set scope is still asserted in the handler below.
+    "estimateReviewEffort",
 )
 
 # Fields narrower than the Admin/Author default. Resetting discards every label in
@@ -157,6 +160,8 @@ def handler(event, context):
     elif field_name == "getDraftLabelJob":
         return get_draft_label_job(event["arguments"])
     elif field_name == "estimateReviewEffort":
+        # Annotator-reachable: group membership alone would expose other sets.
+        assert_can_access_test_set(event, event["arguments"].get("testSetId") or "")
         return estimate_review_effort(event["arguments"])
     elif field_name == "getAnnotationQueue":
         return get_annotation_queue(event["arguments"], event)
@@ -641,6 +646,60 @@ def _as_int(value):
         return None
 
 
+def _label_jobs(test_set_id):
+    """Every labeling job recorded for a set, oldest first.
+
+    Job items are per-run (SK ``labeljob#{runId}``), so they accumulate rather than
+    overwrite — which is what makes per-document run resolution possible without
+    storing a new map.
+    """
+    jobs = []
+    start_key = None
+    for _ in range(20):
+        page = db_client.query(
+            key_condition_expression="PK = :pk AND begins_with(SK, :sk)",
+            expression_attribute_values={
+                ":pk": f"testset#{test_set_id}",
+                ":sk": "labeljob#",
+            },
+            exclusive_start_key=start_key,
+        )
+        jobs.extend(page.get("Items") or [])
+        next_key = page.get("LastEvaluatedKey")
+        if not next_key or next_key == start_key:
+            break
+        start_key = next_key
+    return sorted(jobs, key=lambda j: str(j.get("createdAt") or ""))
+
+
+def _run_id_by_object_key(test_set_id):
+    """Which labeling run produced each document's pipeline copy.
+
+    Review keys are ``{runId}/{filename}``, so this cannot be a single per-set
+    pointer: re-extracting one document creates a one-document run, and resolving
+    the whole set through that run's id makes every *other* document look
+    unprocessed — no review key, no claim state, "not ready to annotate" for work
+    that is in fact ready.
+
+    Later jobs win, so a re-extracted document points at its newest run while its
+    neighbours keep theirs. A job with no explicit ``objectKeys`` covered the whole
+    set, and is applied as a default for documents no later job names.
+    """
+    per_doc = {}
+    default_run = None
+    for job in _label_jobs(test_set_id):
+        run_id = job.get("jobId")
+        if not run_id:
+            continue
+        object_keys = job.get("objectKeys") or []
+        if object_keys:
+            for key in object_keys:
+                per_doc[key] = run_id
+        else:
+            default_run = run_id
+    return per_doc, default_run
+
+
 def _harvest_active_label_job(test_set_id, meta):
     """Advance the set's most recent labeling job and return its current state.
 
@@ -648,23 +707,38 @@ def _harvest_active_label_job(test_set_id, meta):
     the harvest or the job never progresses. Best-effort: a harvest failure must
     not fail the queue, which still works for already-labeled documents.
     """
-    job_id = meta.get("labelJobId")
-    if not job_id:
-        return None
+    # Every non-terminal job, not just the one the set's pointer names: a
+    # one-document re-extract repoints it, and harvesting only the pointer would
+    # orphan a full run still in flight — its remaining documents would never
+    # reach the baseline.
+    jobs = [
+        j for j in _label_jobs(test_set_id) if j.get("status") not in ("COMPLETED", "FAILED")
+    ]
+    if not jobs:
+        pointer = meta.get("labelJobId")
+        if not pointer:
+            return None
+        return db_client.get_item(
+            {"PK": f"testset#{test_set_id}", "SK": _label_job_sk(pointer)}
+        )
 
-    job = db_client.get_item(
-        {"PK": f"testset#{test_set_id}", "SK": _label_job_sk(job_id)}
-    )
-    if not job:
-        return None
-    if job.get("status") in ("COMPLETED", "FAILED"):
-        return job
+    harvested = []
+    for job in jobs:
+        try:
+            harvested.append(_harvest_label_job(job))
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                f"Queue harvest failed for labeling job {job.get('jobId')}: {e}"
+            )
+            harvested.append(job)
 
-    try:
-        return _harvest_label_job(job)
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Queue harvest failed for labeling job {job_id}: {e}")
-        return job
+    # Report the job the UI is tracking when it is one of these, else the newest,
+    # so a progress banner follows the run the user started.
+    pointer = meta.get("labelJobId")
+    for job in harvested:
+        if job.get("jobId") == pointer:
+            return job
+    return harvested[-1]
 
 
 def _documents_needing_labels(test_set_id):
@@ -791,7 +865,10 @@ def generate_draft_labels(args, event=None):
     }
     db_client.put_item(job_item)
 
-    # Recorded on the set so progress survives the user navigating away.
+    # Recorded on the set so progress survives the user navigating away. The
+    # drafting run's resolved config version is not stored here: labelJobId IS a
+    # test run id, so testrun#{labelJobId}.ConfigVersion already carries it,
+    # resolved by the runner even when the caller passed none.
     db_client.update_item(
         key={"PK": f"testset#{test_set_id}", "SK": "metadata"},
         update_expression="SET labelJobId = :j, labelJobStatus = :s",
@@ -838,9 +915,22 @@ def reextract_test_set_document(args, event=None):
             test_set_bucket, test_set_id, object_key, document_class
         )
 
-    config_version = input_data.get("configVersion") or meta.get(
-        "labelJobConfigVersion"
-    )
+    # Reuse the config that drafted the set's labels, so one document is not
+    # re-extracted under a different config than its neighbours. Read from the
+    # drafting run rather than the set: labelJobId is a test run id, and the runner
+    # resolved the version there even when the original call passed none. (This
+    # previously read a labelJobConfigVersion attribute that was never written, so
+    # the fallback silently did nothing.)
+    config_version = input_data.get("configVersion")
+    if not config_version and meta.get("labelJobId"):
+        tracking = boto3.resource("dynamodb").Table(os.environ["TRACKING_TABLE"])
+        drafting_run = (
+            tracking.get_item(
+                Key={"PK": f"testrun#{meta['labelJobId']}", "SK": "metadata"}
+            ).get("Item")
+            or {}
+        )
+        config_version = drafting_run.get("ConfigVersion")
     result = generate_draft_labels(
         {
             "input": {
@@ -1154,7 +1244,10 @@ def get_annotation_queue(args, event=None):
     # Review operations (claimReview / completeSectionReview) key on the pipeline
     # copy of a document, "{runId}/{filename}", not the test-set key. It is returned
     # so no client has to reconstruct that backend key layout.
-    run_id = meta.get("labelJobId")
+    # Per document, not one pointer for the set: see _run_id_by_object_key.
+    per_doc_run, default_run = _run_id_by_object_key(test_set_id)
+    if not per_doc_run and not default_run:
+        default_run = meta.get("labelJobId")
     entries = []
     for doc in documents:
         state = claims.get(doc["objectKey"], {})
@@ -1170,13 +1263,14 @@ def get_annotation_queue(args, event=None):
         # A pipeline copy exists only for documents the labeling run processed, and
         # draft labeling skips documents that already have ground truth. Offering a
         # review key without one yields "Document <runId>/<file> not found".
-        has_pipeline_copy = bool(run_id) and state.get("exists", False)
+        doc_run = per_doc_run.get(doc["objectKey"]) or default_run
+        has_pipeline_copy = bool(doc_run) and state.get("exists", False)
         entries.append(
             {
                 "objectKey": doc["objectKey"],
                 "inputKey": doc["inputKey"],
                 "reviewObjectKey": (
-                    f"{run_id}/{doc['objectKey']}" if has_pipeline_copy else None
+                    f"{doc_run}/{doc['objectKey']}" if has_pipeline_copy else None
                 ),
                 "minConfidence": doc.get("minConfidence"),
                 "confidenceThreshold": doc.get("confidenceThreshold"),
@@ -1297,8 +1391,11 @@ def _claim_state_for_documents(test_set_id, meta, documents):
     from the set's most recent labeling run. Without one, nothing is claimed and
     every document reads as available.
     """
-    run_id = meta.get("labelJobId")
-    if not run_id:
+    per_doc_run, default_run = _run_id_by_object_key(test_set_id)
+    if not per_doc_run and not default_run:
+        # Fall back to the set pointer for sets labeled before per-run resolution.
+        default_run = meta.get("labelJobId")
+    if not per_doc_run and not default_run:
         return {}
 
     table_name = os.environ["TRACKING_TABLE"]
@@ -1306,9 +1403,15 @@ def _claim_state_for_documents(test_set_id, meta, documents):
     state = {}
 
     # BatchGetItem rather than a GetItem per document; batches cap at 100 keys.
-    keys_by_pk = {
-        f"doc#{run_id}/{doc['objectKey']}": doc["objectKey"] for doc in documents
-    }
+    # Each document is keyed by the run that produced ITS copy, so a re-extracted
+    # document and its neighbours resolve independently.
+    keys_by_pk = {}
+    for doc in documents:
+        run = per_doc_run.get(doc["objectKey"]) or default_run
+        if run:
+            keys_by_pk[f"doc#{run}/{doc['objectKey']}"] = doc["objectKey"]
+    if not keys_by_pk:
+        return {}
     all_keys = list(keys_by_pk)
     for start in range(0, len(all_keys), 100):
         batch = [{"PK": pk, "SK": "none"} for pk in all_keys[start : start + 100]]
@@ -1927,8 +2030,10 @@ def clear_draft_labels(args):
     to_delete = [
         key
         for key in candidates
-        if not _existing_label_is_human(test_set_bucket, key)
-        and _existing_label_is_draft(test_set_bucket, key)
+        # is_draft already implies not-human (it requires an explicit
+        # draft-machine tag), so checking both doubled the S3 GETs per section
+        # for no added safety.
+        if _existing_label_is_draft(test_set_bucket, key)
     ]
 
     for i in range(0, len(to_delete), 1000):
