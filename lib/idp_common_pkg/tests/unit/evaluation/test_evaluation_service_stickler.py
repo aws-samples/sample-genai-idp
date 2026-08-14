@@ -908,6 +908,149 @@ class TestSticklerEvaluationService:
         assert comparisons[1]["evaluation_method"] == "NumericExact"
         assert comparisons[1]["weight"] == 1.0  # default
 
+    def test_bare_method_annotation_shows_applied_threshold(self):
+        """Fix D: bare FUZZY (no evaluation-threshold) displays Stickler's
+        applied 0.5, not the old hardcoded 0.7 fallback.
+
+        The operator wrote ``x-aws-idp-evaluation-method: FUZZY`` and no
+        ``evaluation-threshold``. The mapper translates to
+        ``x-aws-stickler-comparator: FuzzyComparator`` with no
+        ``x-aws-stickler-threshold``. Stickler's JSON-schema converter then
+        constructs ``ComparableField(threshold=0.5)`` (its own hardcoded
+        default), so scoring uses 0.5 and the reason string reads
+        ``"below threshold (X < 0.5)"``. Before Fix D, the Method column
+        showed ``"Fuzzy (threshold: 0.70)"`` because ``_format_evaluation_method``
+        guessed 0.7 from a hardcoded per-method table (now removed). Fix D
+        reads ``model_fields[...].json_schema_extra._threshold`` (== 0.5)
+        instead, so the Method column matches Stickler's applied value.
+        """
+        from pydantic import create_model
+        from stickler import StructuredModel
+        from stickler.structured_object_evaluator.models.json_schema_field_converter import (  # noqa: E501
+            JsonSchemaFieldConverter,
+        )
+
+        from idp_common.evaluation.service import _format_evaluation_method
+        from idp_common.evaluation.stickler_backend.mapper import SticklerConfigMapper
+        from idp_common.evaluation.stickler_backend.results import (
+            annotate_nested_comparison_methods,
+            applied_threshold_from_field_info,
+            resolve_leaf_model_field,
+        )
+
+        # Build a schema where LineItems[].Description is FUZZY with NO threshold.
+        idp_schema = {
+            "$id": "Bill",
+            "x-aws-idp-document-type": "Bill",
+            "type": "object",
+            "properties": {
+                "LineItems": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "Description": {
+                                "type": "string",
+                                "x-aws-idp-evaluation-method": "FUZZY",
+                                # deliberately no x-aws-idp-evaluation-threshold
+                            },
+                            "Amount": {
+                                "type": "number",
+                                "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+                                "x-aws-idp-evaluation-threshold": 0.01,
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        translated = SticklerConfigMapper.build_stickler_model_config(idp_schema)[
+            "schema"
+        ]
+        conv = JsonSchemaFieldConverter(translated)
+        fields = conv.convert_properties_to_fields(
+            translated.get("properties", {}), translated.get("required", [])
+        )
+        BillModel = create_model(  # type: ignore  # pyright: reportCallIssue=false
+            "Bill", **fields, __base__=StructuredModel
+        )
+
+        # Sanity: resolve_leaf_model_field walks into List[LineItem] and reads
+        # _threshold off the leaf FieldInfo. 0.5 == Stickler's applied value.
+        leaf = resolve_leaf_model_field(BillModel, "LineItems[0].Description")
+        assert leaf is not None, "resolve_leaf_model_field did not reach the leaf"
+        assert applied_threshold_from_field_info(leaf) == pytest.approx(0.5), (
+            "_threshold on the model should be Stickler's applied 0.5, not 0.7"
+        )
+
+        # Run annotate_nested_comparison_methods with the model class threaded
+        # through — this is the Fix D wiring in transform_stickler_result.
+        # field_schema is the translated LineItems array schema; leaf lookup
+        # for threshold now prefers the model over the (absent) schema
+        # extension.
+        line_items_schema = translated["properties"]["LineItems"]
+        comparisons = [
+            {
+                "expected_key": "LineItems[0].Description",
+                "expected_value": "Widget",
+                "actual_value": "Something else entirely",
+            },
+            {
+                "expected_key": "LineItems[0].Amount",
+                "expected_value": 10.0,
+                "actual_value": 10.0,
+            },
+        ]
+        annotate_nested_comparison_methods(
+            comparisons,
+            field_schema=line_items_schema,
+            match_threshold=0.8,
+            format_evaluation_method=_format_evaluation_method,
+            root_model_cls=BillModel,
+        )
+        # The whole point of Fix D: 0.50, not 0.70.
+        assert comparisons[0]["evaluation_method"] == "Fuzzy (threshold: 0.50)"
+        # NumericExact never shows a threshold suffix, so it's unchanged.
+        assert comparisons[1]["evaluation_method"] == "NumericExact"
+
+    def test_bare_method_backward_compat_without_model_cls(self):
+        """Regression: with ``root_model_cls=None`` the schema-only fallback
+        path is used (the previous behavior). Ensures Fix D didn't break
+        callers that don't thread the model class through.
+        """
+        from idp_common.evaluation.service import _format_evaluation_method
+        from idp_common.evaluation.stickler_backend.results import (
+            annotate_nested_comparison_methods,
+        )
+
+        field_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "Description": {
+                        "x-aws-stickler-comparator": "FuzzyComparator",
+                        "x-aws-stickler-threshold": 0.85,
+                    },
+                },
+            },
+        }
+        comparisons = [
+            {
+                "expected_key": "LineItems[0].Description",
+                "expected_value": "A",
+                "actual_value": "B",
+            }
+        ]
+        annotate_nested_comparison_methods(
+            comparisons,
+            field_schema=field_schema,
+            match_threshold=0.8,
+            format_evaluation_method=_format_evaluation_method,
+            # root_model_cls omitted — legacy schema-only lookup.
+        )
+        assert comparisons[0]["evaluation_method"] == "Fuzzy (threshold: 0.85)"
+
     def test_generate_reason(self, service):
         """Test reason generation."""
         # Test exact match
