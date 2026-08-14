@@ -500,7 +500,7 @@ class Z3Validator:
         token = tokens[pos]
 
         # Handle opening parenthesis (function application)
-        if token == "(":  # nosec B105
+        if token == "(":  # nosec B105 - SMT-LIB grammar literal, not a password
             pos += 1
             if pos >= len(tokens):
                 raise ValueError("Unexpected end after '('")
@@ -524,7 +524,7 @@ class Z3Validator:
             return result, pos
 
         # Handle closing parenthesis (shouldn't happen in well-formed input)
-        elif token == ")":  # nosec B105
+        elif token == ")":  # nosec B105 - SMT-LIB grammar literal, not a password
             raise ValueError("Unexpected ')'")
 
         # Handle atoms (variables, numbers, booleans, strings)
@@ -547,9 +547,9 @@ class Z3Validator:
             return z3_vars[token]
 
         # Check if it's a boolean
-        if token == "true":  # nosec B105
+        if token == "true":  # nosec B105 - SMT-LIB boolean literal, not a password
             return z3.BoolVal(True)
-        if token == "false":  # nosec B105
+        if token == "false":  # nosec B105 - SMT-LIB boolean literal, not a password
             return z3.BoolVal(False)
 
         # Check if it's a number

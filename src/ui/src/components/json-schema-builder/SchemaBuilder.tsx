@@ -221,6 +221,10 @@ const SchemaBuilder = ({
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '_')
           .replace(/^_|_$/g, '');
+        // Fallback if slug is empty (e.g. all-punctuation name)
+        if (!ruleId) {
+          ruleId = `rule_${Date.now()}`;
+        }
         // Ensure uniqueness within the class
         const selectedClass = classes.find((c) => c.id === selectedClassId);
         if (selectedClass) {

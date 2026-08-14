@@ -1056,12 +1056,21 @@ class RuleValidationOrchestratorService:
 
         for policy_type, responses in all_responses.items():
             if policy_type not in metadata_fields:
+                # Strip internal markers before persisting to S3
+                clean_responses = responses
+                if isinstance(responses, list):
+                    clean_responses = [
+                        {k: v for k, v in r.items() if not k.startswith("_")}
+                        if isinstance(r, dict)
+                        else r
+                        for r in responses
+                    ]
                 output_key = f"{document_input_key}/rule_validation/consolidated/{policy_type}_responses.json"
                 output_uri = f"s3://{output_bucket}/{output_key}"
 
                 # Save to S3
                 s3.write_content(
-                    responses,
+                    clean_responses,
                     output_bucket,
                     output_key,
                     content_type="application/json",

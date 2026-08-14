@@ -212,7 +212,7 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: *cfg
-    args: { ruleDescription: "test rule" }
+    args: { ruleDescription: "" }
   deleteConfigVersion:
     groups: [Admin]
     kind: mutation

@@ -35,6 +35,9 @@ _dynamodb = boto3.resource("dynamodb")
 _user_scope_cache = {}
 _USER_SCOPE_CACHE_TTL = 60  # seconds
 
+# Lazy-initialized RuleTranslator (reused across requests within same container)
+_rule_translator = None
+
 
 def _get_caller_info(event):
     """Extract caller's email and groups from AppSync event identity."""
@@ -1259,9 +1262,11 @@ def handle_generate_rule_json(rule_description: str):
 
         from idp_common.rule_validation.z3.rule_translator import RuleTranslator
 
-        # Initialize the translator with default config
-        # (uses translator_config.yaml packaged with idp_common)
-        translator = RuleTranslator()
+        # Reuse a module-level translator instance across requests
+        global _rule_translator  # noqa: PLW0603
+        if _rule_translator is None:
+            _rule_translator = RuleTranslator()
+        translator = _rule_translator
 
         # Translate the natural language rule to RuleJSON.
         # Pass empty data_example since we don't have sample data at config time.

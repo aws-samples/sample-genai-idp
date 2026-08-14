@@ -63,6 +63,7 @@ SAMPLE_RULE_JSON = {
 }
 
 
+@pytest.mark.unit
 class TestCollectFactsAcrossSections:
     def test_collects_from_multiple_responses(self):
         from idp_common.rule_validation.orchestrator import (
@@ -102,6 +103,7 @@ class TestCollectFactsAcrossSections:
         assert facts == []
 
 
+@pytest.mark.unit
 class TestGetRuleJsonFromConfig:
     def test_finds_rule_json_by_id_and_policy_type(self):
         from idp_common.rule_validation.orchestrator import (
@@ -140,6 +142,7 @@ class TestGetRuleJsonFromConfig:
         assert result is None
 
 
+@pytest.mark.unit
 class TestRunZ3Validation:
     def test_pass_when_constraints_satisfied(self):
         from idp_common.config.models import IDPConfig
@@ -178,6 +181,7 @@ class TestRunZ3Validation:
         assert result["_z3_validated"] is True
 
 
+@pytest.mark.unit
 class TestProcessZ3CrossSectionRules:
     @pytest.mark.asyncio
     async def test_z3_rule_produces_verdict(self):
