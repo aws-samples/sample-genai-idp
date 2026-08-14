@@ -207,3 +207,105 @@ class TestPolicyClassificationMultipleClasses:
         service = PolicyClassificationService(config=cfg)
         result = service.classify_document(_doc("medicare_x.pdf"))
         assert result.matched_policy_types == ["good"]
+
+
+@pytest.mark.unit
+class TestLegacyRuleTypeDiscriminator:
+    """A class keyed on the legacy discriminator must still be matched (#600).
+
+    Raw rules-discovery output and pre-v0.5.9 configs carry
+    `x-aws-idp-rule-type`. Reading only `x-aws-idp-policy-type` meant such a
+    class was skipped here with nothing logged, so rule validation silently
+    produced no output.
+    """
+
+    def test_legacy_rule_type_is_honored(self):
+        cfg = _config_with_policies(
+            {
+                "x-aws-idp-rule-type": "legacy_policy",
+                "rule_properties": {"r": {"type": "string", "description": "Q?"}},
+            }
+        )
+        service = PolicyClassificationService(config=cfg)
+        result = service.classify_document(_doc("anything.pdf"))
+        assert result.matched_policy_types == ["legacy_policy"]
+
+    def test_current_key_wins_when_both_present(self):
+        cfg = _config_with_policies(
+            {
+                "x-aws-idp-policy-type": "current",
+                "x-aws-idp-rule-type": "legacy",
+                "rule_properties": {"r": {"type": "string", "description": "Q?"}},
+            }
+        )
+        service = PolicyClassificationService(config=cfg)
+        result = service.classify_document(_doc("anything.pdf"))
+        assert result.matched_policy_types == ["current"]
+
+    def test_class_with_neither_key_is_still_skipped(self):
+        cfg = _config_with_policies({"rule_properties": {"r": {"description": "Q?"}}})
+        service = PolicyClassificationService(config=cfg)
+        assert service.policy_classes == []
+
+
+@pytest.mark.unit
+class TestSecondDiscoveredClassRegression:
+    """Two regex-less discovered classes match nothing — the documented trap (#601).
+
+    This asserts the CURRENT fail-closed behavior rather than the behavior the
+    issue's suggested test wanted, because failing open would run every rule
+    against every document. The fix for #601 is that the discovery job now warns
+    at save time (see RulesDiscovery._warn_if_no_regex); this test pins the
+    runtime contract that warning describes, so the two cannot drift.
+    """
+
+    def test_two_regexless_classes_match_nothing(self):
+        cfg = _config_with_policies(
+            {"x-aws-idp-policy-type": "policy_a", "rule_properties": {}},
+            {"x-aws-idp-policy-type": "policy_b", "rule_properties": {}},
+        )
+        service = PolicyClassificationService(config=cfg)
+        result = service.classify_document(_doc("some_doc.pdf"))
+        assert result.matched_policy_types == []
+
+    def test_one_class_without_regex_is_fine_when_another_has_one(self):
+        """A regex on any class re-enables matching for the classes that have one."""
+        cfg = _config_with_policies(
+            {
+                "x-aws-idp-policy-type": "policy_a",
+                "x-aws-idp-document-name-regex": r"(?i).*claim.*",
+                "rule_properties": {},
+            },
+            {"x-aws-idp-policy-type": "policy_b", "rule_properties": {}},
+        )
+        service = PolicyClassificationService(config=cfg)
+        result = service.classify_document(_doc("claim_1.pdf"))
+        assert result.matched_policy_types == ["policy_a"]
+
+
+@pytest.mark.unit
+class TestServiceSideLegacyLookup:
+    """The classifier and the question lookup must agree on the discriminator.
+
+    If PolicyClassificationService honors the legacy key but the service's
+    question lookup does not, a class classifies and then yields ZERO rule
+    questions — the same silent no-op, one stage later.
+    """
+
+    def test_policy_types_and_questions_both_read_legacy_key(self):
+        from idp_common.rule_validation.service import RuleValidationService
+
+        config = {
+            "policy_classes": [
+                {
+                    "x-aws-idp-rule-type": "legacy_policy",
+                    "rule_properties": {
+                        "r1": {"type": "string", "description": "Question one?"}
+                    },
+                }
+            ]
+        }
+        service = RuleValidationService.__new__(RuleValidationService)
+
+        assert service._get_policy_types(config) == ["legacy_policy"]
+        assert service._get_rule_questions(config, "legacy_policy") == ["Question one?"]

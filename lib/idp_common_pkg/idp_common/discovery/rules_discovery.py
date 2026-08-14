@@ -8,8 +8,11 @@ This module provides a service for analyzing policy documents and extracting
 structured rules that can be used by the RuleValidationService to validate
 transactions against those rules.
 
-The extracted rules are stored in the `rule_classes` configuration field,
-which is consumed by RuleValidationService at runtime.
+The extracted rules are stored in the `policy_classes` configuration field,
+which is consumed by RuleValidationService at runtime. Each entry carries the
+`x-aws-idp-policy-type` discriminator — the only key the runtime and the UI
+read. (The LLM emits `x-aws-idp-rule-type`; `to_policy_class` converts it. The
+`rule_classes` config key was renamed to `policy_classes` in v0.5.9.)
 """
 
 import json
@@ -43,16 +46,107 @@ except ImportError as _agentic_import_error:
     )
 
 
+def to_policy_class(rule_class: Dict[str, Any], unique_type: str) -> Dict[str, Any]:
+    """Reshape a discovered rule class into the persisted ``policy_classes`` shape.
+
+    The LLM emits ``x-aws-idp-rule-type`` and bare ``rule_properties``, but the
+    runtime (``PolicyClassificationService``) and the UI's Policy Schema tab both
+    key exclusively off ``x-aws-idp-policy-type``, and expect a JSON-Schema-shaped
+    object. This is the single place that conversion happens, so the S3 path and
+    the local/notebook path cannot drift: previously the reshape was inlined in
+    ``_save_rules_to_config``, so ``discovery_rules_from_document_local`` returned
+    raw LLM output that silently never matched anything.
+
+    Args:
+        rule_class: A discovered rule class as emitted by the LLM.
+        unique_type: The (already de-duplicated) policy type name to assign.
+
+    Returns:
+        A policy class dict ready to persist under ``config.policy_classes``.
+    """
+    reshaped_props: Dict[str, Dict[str, Any]] = {}
+    for prop_name, prop_def in (rule_class.get("rule_properties") or {}).items():
+        if isinstance(prop_def, dict):
+            reshaped_props[prop_name] = {
+                "type": "string",
+                "description": prop_def.get("description", ""),
+                **{
+                    k: v
+                    for k, v in prop_def.items()
+                    if k not in ("type", "description")
+                },
+            }
+        else:
+            reshaped_props[prop_name] = {
+                "type": "string",
+                "description": str(prop_def),
+            }
+
+    reshaped_class: Dict[str, Any] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": unique_type,
+        "type": "object",
+        "x-aws-idp-policy-type": unique_type,
+        "rule_properties": reshaped_props,
+    }
+    if rule_class.get("description"):
+        reshaped_class["description"] = rule_class["description"]
+    return reshaped_class
+
+
+def _is_max_tokens_error(exc: Exception) -> bool:
+    """Detect Strands' hard failure on a response truncated at max output tokens.
+
+    Strands raises ``MaxTokensReachedException`` when the model stops with
+    ``stopReason == "max_tokens"``, and deliberately lets it bubble up rather
+    than wrapping it. Match on type name and message text rather than importing
+    the Strands exception type, mirroring ``_is_context_overflow_error`` in
+    ``extraction.agentic_idp`` — this module must stay importable when the
+    agentic extras are not installed.
+    """
+    if "maxtokensreached" in type(exc).__name__.lower():
+        return True
+    msg = str(exc).lower()
+    return "max_tokens limit" in msg or "due to max_tokens" in msg
+
+
+class RulesTruncatedError(Exception):
+    """Rule extraction was truncated at the model's output token limit.
+
+    Raised instead of returning a structurally-valid but incomplete ruleset.
+    A rule missing from a compliance validation set fails silently — the
+    document is validated against a subset of the policy and reported as
+    compliant — so a failed job is the better outcome. The message carries the
+    remediation (split the document, or raise ``discovery.rules.max_tokens``)
+    and reaches the UI via the discovery job's status message.
+    """
+
+
 class RulesDiscovery:
     """
     Discovers and extracts rules from policy documents using LLMs.
 
     This is a one-time setup process analogous to ClassesDiscovery:
     - ClassesDiscovery: sample document → JSON Schema (field definitions) → config.classes
-    - RulesDiscovery: policy document → rule definitions → config.rule_classes
+    - RulesDiscovery: policy document → rule definitions → config.policy_classes
 
-    The extracted rule_classes are then consumed by RuleValidationService
+    The extracted policy_classes are then consumed by RuleValidationService
     to validate transaction documents against the discovered rules.
+
+    The two entry points differ in what they do with the result, so note which
+    one you are using:
+
+    - ``discovery_rules_from_document`` (S3) **persists** the rules itself, via
+      ``_save_rules_to_config`` → ``to_policy_class``. Its return value is for
+      reporting (it carries the assigned type names, not the full reshape).
+    - ``discovery_rules_from_document_local`` persists nothing, so it returns
+      rules already in the ``policy_classes`` shape — keyed on
+      ``x-aws-idp-policy-type`` — for the caller to write into a config as-is.
+
+    NOTE: rule validation additionally requires a document-matching regex on
+    each policy class once a config holds more than one — discovery does not
+    set one, and a save that creates that state emits a warning (see
+    ``_warn_if_no_regex``).
 
     Usage:
         # With S3
@@ -99,6 +193,9 @@ class RulesDiscovery:
         self.input_prefix = input_prefix
         self.region = region or os.environ.get("AWS_REGION")
         self.version = version
+        # Non-fatal advisories raised by the last save (regex-less classes,
+        # duplicated rule names). Surfaced in the discovery job's statusMessage.
+        self._save_warnings: List[str] = []
 
         if config is not None:
             self.config = config
@@ -165,10 +262,18 @@ class RulesDiscovery:
                     rc["x-aws-idp-rule-type"] = derived_name
 
             # Save to configuration if config_manager is available
+            self._save_warnings = []
             if self.config_manager:
                 self._save_rules_to_config(extracted_rules)
 
-            return {"status": "SUCCESS", "rules": extracted_rules}
+            # Warnings ride along on the result so the calling Lambda can put
+            # them in the job's statusMessage. A CloudWatch WARNING alone does
+            # not reach the person who ran the discovery.
+            return {
+                "status": "SUCCESS",
+                "rules": extracted_rules,
+                "warnings": list(self._save_warnings),
+            }
 
         except Exception as e:
             logger.error(
@@ -182,11 +287,19 @@ class RulesDiscovery:
 
         Convenience method for notebook/local usage without needing S3.
 
+        Returns rules in the SAME shape the S3 path persists — i.e. carrying
+        ``x-aws-idp-policy-type``, ``$id``, ``$schema`` and ``type: object`` — so
+        a caller can write the result straight into ``config.policy_classes`` and
+        have it work. This method previously returned raw LLM output keyed on
+        ``x-aws-idp-rule-type``, which no consumer reads: rule validation then
+        silently never fired, with no error anywhere.
+
         Args:
             file_path: Local path to the policy document (PDF or image)
 
         Returns:
-            Dict with status and extracted rules
+            Dict with status and extracted rules, ready to persist under
+            ``policy_classes``.
         """
         logger.info(f"Extracting rules from local document: {file_path}")
 
@@ -203,7 +316,25 @@ class RulesDiscovery:
             if extracted_rules is None:
                 raise Exception("Failed to extract rules from document")
 
-            return {"status": "SUCCESS", "rules": extracted_rules}
+            # Reshape to the persisted contract. Names are de-duplicated within
+            # this batch only; there is no existing config to collide with here.
+            seen: set = set()
+            reshaped: List[Dict[str, Any]] = []
+            for rc in extracted_rules:
+                base = (
+                    rc.get("x-aws-idp-rule-type")
+                    or rc.get("x-aws-idp-policy-type")
+                    or "policy_rules"
+                )
+                unique_type = base
+                suffix = 2
+                while unique_type in seen:
+                    unique_type = f"{base}_{suffix}"
+                    suffix += 1
+                seen.add(unique_type)
+                reshaped.append(to_policy_class(rc, unique_type))
+
+            return {"status": "SUCCESS", "rules": reshaped}
 
         except Exception as e:
             logger.error(f"Error extracting rules from {file_path}: {e}", exc_info=True)
@@ -297,6 +428,56 @@ class RulesDiscovery:
                     f"Bedrock response (attempt {attempt + 1}): {content_text[:500]}"
                 )
 
+                # Did the model stop because it hit its output-token ceiling? A
+                # truncated response USUALLY fails to parse, but not always: a
+                # response cut off after rule 60 of 140 that happens to close its
+                # braces — or that extract_json_from_text recovers to a valid
+                # prefix — passes every structural check below, because those
+                # validate shape, not completeness. Persisting that quietly means
+                # a compliance ruleset silently missing most of its rules, which
+                # is worse than a failed job. Recognize both the Bedrock Converse
+                # signal and the OpenAI Responses adapter's mapped status, as
+                # assessment/service.py does.
+                if self._response_was_truncated(response):
+                    partial_count = self._count_rules(
+                        self._safe_parse_rules(content_text)
+                    )
+                    validation_feedback = (
+                        "Your previous response was cut off at the output token "
+                        "limit, so the rule list was incomplete. Return the "
+                        "complete rule set, using more concise rule descriptions "
+                        "if necessary so the response fits."
+                    )
+                    logger.warning(
+                        "Rules extraction hit the output token limit on attempt %d "
+                        "(~%d rule(s) recovered, ruleset INCOMPLETE). Retrying. If "
+                        "this persists, split the policy document by chapter or "
+                        "raise discovery.rules.max_tokens.",
+                        attempt + 1,
+                        partial_count,
+                    )
+                    if attempt == max_retries - 1:
+                        logger.error(
+                            "Rules extraction truncated at the output token limit "
+                            "on all %d attempts. Refusing to persist a partial "
+                            "ruleset — %d of an unknown total rule(s) were "
+                            "recovered. Split the policy document into smaller "
+                            "uploads or raise discovery.rules.max_tokens.",
+                            max_retries,
+                            partial_count,
+                        )
+                        raise RulesTruncatedError(
+                            f"The model's response was truncated at its output token "
+                            f"limit on all {max_retries} attempts, so the extracted "
+                            f"ruleset is incomplete "
+                            f"(~{partial_count} rule(s) recovered). "
+                            f"A partial ruleset is not saved, because rules missing "
+                            f"from a compliance validation set fail silently. Split "
+                            f"the policy document into smaller uploads (e.g. by "
+                            f"chapter), or raise discovery.rules.max_tokens."
+                        )
+                    continue
+
                 # Extract JSON from LLM response (handles markdown fencing, preamble text, etc.)
                 json_text = extract_json_from_text(content_text)
                 parsed = json.loads(json_text)
@@ -330,6 +511,12 @@ class RulesDiscovery:
                         f"Failed to generate valid JSON after {max_retries} attempts"
                     )
                     return None
+            except RulesTruncatedError:
+                # Deliberate refusal to persist a knowingly-partial ruleset —
+                # must reach the caller, not be flattened into a None return by
+                # the catch-all below (which would read as an ordinary failure
+                # and lose the actionable remediation in the message).
+                raise
             except Exception as e:
                 logger.error(f"Error extracting rules on attempt {attempt + 1}: {e}")
                 if attempt == max_retries - 1:
@@ -437,6 +624,37 @@ class RulesDiscovery:
                 f"with {total_individual_rules} individual rules"
             )
 
+            # Same completeness concern as the traditional path: schema
+            # enforcement proves the SHAPE is right, not that the model finished
+            # listing rules. A response cut off at the token ceiling can still
+            # deserialize into a valid RuleDiscoveryOutput holding a fraction of
+            # the policy's rules. Refuse it rather than persisting silently.
+            #
+            # NOTE: on this path the primary protection is Strands raising
+            # MaxTokensReachedException (translated in the handler below) — it
+            # fails hard on stopReason == "max_tokens" before returning. This
+            # check is a belt-and-braces fallback: structured_output() currently
+            # synthesizes its envelope WITHOUT a stopReason, so it does not fire
+            # today, but it will start working if that envelope ever carries the
+            # real stop reason. Keeping both means neither a Strands behavior
+            # change nor an envelope change can reopen the silent-persist hole.
+            if self._response_was_truncated(response_with_metering):
+                logger.error(
+                    "Agentic rules extraction hit the output token limit — "
+                    "%d rule(s) recovered but the ruleset is INCOMPLETE. "
+                    "Refusing to persist a partial ruleset.",
+                    total_individual_rules,
+                )
+                raise RulesTruncatedError(
+                    f"The model's response was truncated at its output token limit, "
+                    f"so the extracted ruleset is incomplete "
+                    f"(~{total_individual_rules} rule(s) recovered). A partial ruleset "
+                    f"is not saved, because rules missing from a compliance "
+                    f"validation set fail silently. Split the policy document into "
+                    f"smaller uploads (e.g. by chapter), or raise "
+                    f"discovery.rules.max_tokens."
+                )
+
             # Log metering info
             metering = response_with_metering.get("metering", {})
             if metering:
@@ -444,9 +662,65 @@ class RulesDiscovery:
 
             return rules
 
+        except RulesTruncatedError:
+            # Already logged with remediation above; don't re-log as a generic
+            # agentic failure.
+            raise
         except Exception as e:
+            # Strands fails hard on truncation, raising MaxTokensReachedException
+            # rather than returning a partial result (and special-cases it to
+            # bubble up rather than be wrapped). So the agentic path already
+            # refuses to persist a partial ruleset — but it surfaces as an opaque
+            # "Agent has reached an unrecoverable state" with no mention of what
+            # to do about it. Translate it into the same actionable error the
+            # traditional path raises, so both paths give the user the same
+            # remedies instead of one of them requiring Strands knowledge.
+            if _is_max_tokens_error(e):
+                logger.error(
+                    "Agentic rules extraction hit the output token limit "
+                    "(Strands MaxTokensReachedException). Refusing to persist a "
+                    "partial ruleset."
+                )
+                raise RulesTruncatedError(
+                    "The model's response was truncated at its output token "
+                    "limit, so the extracted ruleset is incomplete. A partial "
+                    "ruleset is not saved, because rules missing from a "
+                    "compliance validation set fail silently. Split the policy "
+                    "document into smaller uploads (e.g. by chapter), or raise "
+                    f"discovery.rules.max_tokens. (underlying error: {e})"
+                ) from e
             logger.error(f"Agentic rule discovery failed: {e}", exc_info=True)
             raise
+
+    @staticmethod
+    def _response_was_truncated(response: Dict[str, Any]) -> bool:
+        """Did the model stop because it ran out of output tokens?
+
+        Recognizes the Bedrock Converse signal (``stopReason == "max_tokens"``)
+        and the OpenAI Responses adapter's mapped status, so the check holds
+        across model families.
+        """
+        raw = response.get("response", response) if isinstance(response, dict) else None
+        stop_reason = raw.get("stopReason") if isinstance(raw, dict) else None
+        return stop_reason in ("max_tokens", "max_output_tokens", "incomplete")
+
+    def _safe_parse_rules(self, content_text: str) -> List[Dict[str, Any]]:
+        """Best-effort parse of a possibly-truncated response, for reporting only.
+
+        Used to tell the user roughly how many rules were recovered before the
+        cutoff. Never raises: the input is expected to be malformed.
+        """
+        try:
+            return self._normalize_rules_response(
+                json.loads(extract_json_from_text(content_text))
+            )
+        except Exception:
+            return []
+
+    @staticmethod
+    def _count_rules(rules: List[Dict[str, Any]]) -> int:
+        """Total individual rules across all rule classes."""
+        return sum(len(rc.get("rule_properties") or {}) for rc in rules)
 
     def _normalize_rules_response(self, model_response: Any) -> List[Dict[str, Any]]:
         """
@@ -640,35 +914,7 @@ class RulesDiscovery:
                 suffix += 1
             assigned_types.append(unique_type)
 
-            reshaped_props: Dict[str, Dict[str, Any]] = {}
-            for prop_name, prop_def in (new_rule.get("rule_properties") or {}).items():
-                if isinstance(prop_def, dict):
-                    reshaped_props[prop_name] = {
-                        "type": "string",
-                        "description": prop_def.get("description", ""),
-                        **{
-                            k: v
-                            for k, v in prop_def.items()
-                            if k not in ("type", "description")
-                        },
-                    }
-                else:
-                    reshaped_props[prop_name] = {
-                        "type": "string",
-                        "description": str(prop_def),
-                    }
-
-            reshaped_class: Dict[str, Any] = {
-                "$schema": "https://json-schema.org/draft/2020-12/schema",
-                "$id": unique_type,
-                "type": "object",
-                "x-aws-idp-policy-type": unique_type,
-                "rule_properties": reshaped_props,
-            }
-            if new_rule.get("description"):
-                reshaped_class["description"] = new_rule["description"]
-
-            existing_policy_classes.append(reshaped_class)
+            existing_policy_classes.append(to_policy_class(new_rule, unique_type))
             existing_types.add(unique_type)
 
         if not existing_item:
@@ -688,7 +934,126 @@ class RulesDiscovery:
             f"Saved {len(rules)} rule classes to Config#{version}.policy_classes "
             f"(total: {len(existing_policy_classes)}, assigned: {assigned_types})"
         )
+
+        # Report the two states this save can silently create. Both are checked
+        # here, at the job that CREATES them, rather than only at the runtime
+        # that suffers them — a WARNING in a downstream Lambda log an hour later
+        # is not a signal anyone connects back to a discovery run.
+        self._save_warnings = [
+            w
+            for w in (
+                self._warn_if_no_regex(existing_policy_classes, version),
+                self._warn_if_rules_duplicated(existing_policy_classes, rules),
+            )
+            if w
+        ]
         return assigned_types
+
+    @staticmethod
+    def _warn_if_no_regex(
+        policy_classes: List[Dict[str, Any]], version: Optional[str]
+    ) -> Optional[str]:
+        """Warn about policy classes that cannot be matched once there are ≥2.
+
+        Discovery never sets a regex, and ``PolicyClassificationService``
+        requires one as soon as there are ≥2 classes. Two distinct bad states
+        follow, and both are silent (see #601):
+
+        1. **No class has a regex** — rule validation fires for NOTHING, so a
+           second discovery run switches off the FIRST policy's rules too.
+        2. **Some classes have one and some don't** — the regex-less classes are
+           simply never evaluated while the others work. This is the likelier
+           state *after* a user acts on warning (1): they add a regex to policy
+           A, run discovery again, and new class B silently can't fire. Warning
+           only on the all-or-nothing case would leave the follow-up
+           uncaught — which is the stricter rule the ``config_library`` preset
+           gate already enforces, so the two now agree.
+        """
+        if len(policy_classes) <= 1:
+            return None
+
+        def has_regex(pc: Dict[str, Any]) -> bool:
+            return bool(
+                pc.get("x-aws-idp-document-name-regex")
+                or pc.get("x-aws-idp-page-content-regex")
+            )
+
+        unmatched = [
+            pc.get("x-aws-idp-policy-type") or pc.get("x-aws-idp-rule-type") or "?"
+            for pc in policy_classes
+            if not has_regex(pc)
+        ]
+        if not unmatched:
+            return None
+
+        total = len(policy_classes)
+        if len(unmatched) == total:
+            message = (
+                f"Config#{version} now has {total} policy classes and NONE has a "
+                f"document-matching regex. Rule validation requires a regex when "
+                f"multiple policy classes exist, so it will NOT fire for ANY of "
+                f"them until you add one. Set a Document Name Regex (or Page "
+                f"Content Regex) on each policy class in Configuration → Policy "
+                f"Schema."
+            )
+        else:
+            shown = ", ".join(sorted(unmatched)[:10])
+            more = f" (and {len(unmatched) - 10} more)" if len(unmatched) > 10 else ""
+            message = (
+                f"Config#{version} has {total} policy classes, and {len(unmatched)} "
+                f"of them have no document-matching regex: {shown}{more}. With "
+                f"multiple policy classes only regex-matched classes are "
+                f"evaluated, so THESE classes' rules will never fire while the "
+                f"others do. Add a Document Name Regex (or Page Content Regex) to "
+                f"each in Configuration → Policy Schema."
+            )
+        logger.warning(message)
+        return message
+
+    @staticmethod
+    def _warn_if_rules_duplicated(
+        policy_classes: List[Dict[str, Any]], newly_added: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Warn when incoming rule names already exist in other policy classes.
+
+        A rule duplicated across policies is answered by an LLM once per copy for
+        every document, forever — a standing per-document cost multiplier — and
+        the differently-worded copies can return contradictory Pass/Fail verdicts
+        with nothing indicating they were the same rule. Name matching (no
+        embeddings) catches the common case, since the extraction prompt asks for
+        descriptive snake_case identifiers which converge. See #602.
+        """
+        incoming_names = {
+            name for rc in newly_added for name in (rc.get("rule_properties") or {})
+        }
+        if not incoming_names:
+            return None
+
+        newly_added_types = {rc.get("x-aws-idp-policy-type") for rc in newly_added} | {
+            rc.get("x-aws-idp-rule-type") for rc in newly_added
+        }
+        preexisting_names = {
+            name
+            for rc in policy_classes
+            if rc.get("x-aws-idp-policy-type") not in newly_added_types
+            for name in (rc.get("rule_properties") or {})
+        }
+
+        overlap = sorted(preexisting_names & incoming_names)
+        if not overlap:
+            return None
+
+        shown = ", ".join(overlap[:10])
+        more = f" (and {len(overlap) - 10} more)" if len(overlap) > 10 else ""
+        message = (
+            f"{len(overlap)} rule name(s) already exist in other policy classes "
+            f"and will now be evaluated more than once per document, at full LLM "
+            f"cost each, possibly with conflicting answers: {shown}{more}. Remove "
+            f"the duplicates in Configuration → Policy Schema if they are the same "
+            f"rule."
+        )
+        logger.warning(message)
+        return message
 
     def _create_content_list(
         self, prompt: str, document_content: bytes, file_extension: str

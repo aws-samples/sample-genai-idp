@@ -476,21 +476,20 @@ class PipelineHook(BaseModel):
     )
 
 
-class PreprocessingConfig(BaseModel):
-    """Top-level `preprocessing` section (v0.6).
+class FlatHookConfig(BaseModel):
+    """Shared shape of the two STANDALONE, single-hook pipeline-hook sections:
+    `preprocessing` (runs first) and `postprocessing` (runs last).
 
-    The standalone `preprocessing` pipeline-hook point — the only PRE-step
-    extension point, which runs FIRST (before the BDA/pipeline routing) and may
-    halt the execution. It carries a SINGLE inline hook: `arn`/`args`/`onError`
-    live directly on this section (not a list), unlike the post-step hooks which
-    live under each step's `postHook` list. Keeping it flat makes the config UI
-    read cleanly (ARN + args right under Preprocessing).
+    Unlike the post-step hooks — which live in a LIST under each step's
+    `postHook` — these two carry ONE inline hook whose `arn`/`args`/`onError`
+    live directly on the section. Keeping them flat makes the config UI read
+    cleanly (ARN + args right under Preprocessing / Postprocessing).
 
-    This MUST be a declared field on IDPConfig with extra="allow" — otherwise
-    IDPConfig's extra="ignore" would silently drop the whole block (and its
-    `args`) whenever a config round-trips through IDPConfig (Save-as-Version,
-    updateConfiguration, applyFeatureConfigPreset, sparse-config auto-migration),
-    leaving the dispatcher with no hook to call.
+    Subclasses MUST be declared fields on IDPConfig — otherwise IDPConfig's
+    extra="ignore" would silently drop the whole block (and its `args`) whenever
+    a config round-trips through IDPConfig (Save-as-Version, updateConfiguration,
+    applyFeatureConfigPreset, sparse-config auto-migration), leaving the
+    dispatcher with no hook to call.
     """
 
     # extra="allow" is harmless (the args list carries feature config, not extra
@@ -499,12 +498,12 @@ class PreprocessingConfig(BaseModel):
 
     enabled: bool = Field(
         default=False,
-        description="Run the preprocessing hook for this config version.",
+        description="Run this hook for this config version.",
     )
     arn: Optional[str] = Field(
         default=None,
-        description="Lambda ARN invoked on the source document before any "
-        "processing step. Must be tagged idp:feature-id or named GENAIIDP-*.",
+        description="Lambda ARN the dispatcher invokes. Must be tagged "
+        "idp:feature-id or named GENAIIDP-*.",
     )
     onError: str = Field(  # noqa: N815 — matches stored config key
         default="continue",
@@ -513,7 +512,7 @@ class PreprocessingConfig(BaseModel):
     args: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Generic key/value args (list of {key, value}) the hook reads "
-        "its own config from — keeps the step reusable for any preprocessing job.",
+        "its own config from — keeps the step reusable for any job.",
     )
     featureId: str = Field(  # noqa: N815 — matches stored config key
         default="",
@@ -522,10 +521,37 @@ class PreprocessingConfig(BaseModel):
     allowDocumentUpdate: bool = Field(  # noqa: N815 — matches stored config key
         default=True,
         description="Whether this hook may return an `updatedDocument` that "
-        "replaces the source document for the rest of the pipeline. Set false to "
-        "pin the hook to observe-only (it can still halt, read the document, and "
-        "write to S3).",
+        "replaces the document. Set false to pin the hook to observe-only (it "
+        "can still read the document and write to S3).",
     )
+
+
+class PreprocessingConfig(FlatHookConfig):
+    """Top-level `preprocessing` section (v0.6).
+
+    The standalone PRE-step extension point, which runs FIRST (before the
+    BDA/pipeline routing) and may halt the execution. Single flat hook — see
+    :class:`FlatHookConfig`.
+    """
+
+
+class PostprocessingConfig(FlatHookConfig):
+    """Top-level `postprocessing` section (v0.6).
+
+    The standalone FINAL extension point, which runs LAST (after evaluation,
+    before the workflow's terminal state) on the shared tail, so it fires in
+    both processing modes. Deliberately symmetrical with
+    :class:`PreprocessingConfig`: same single flat-hook shape.
+
+    Two behavioral differences from `preprocessing`, both because the document is
+    already fully processed by the time it runs:
+
+    - `onError: continue` (the default) is the recommended setting. `fail` marks
+      an otherwise-successful document FAILED, which is rarely what you want for
+      a delivery-integration error.
+    - `halt` is not actionable — there is nothing downstream to skip. The
+      dispatcher reports such a request as `haltIgnored` and continues.
+    """
 
 
 class ConfidenceConfig(BaseModel):
@@ -2592,6 +2618,12 @@ class IDPConfig(BaseModel):
     evaluation: EvaluationConfig = Field(
         default_factory=EvaluationConfig, description="Evaluation configuration"
     )
+    postprocessing: PostprocessingConfig = Field(
+        default_factory=PostprocessingConfig,
+        description="Postprocessing configuration — home of the standalone "
+        "`postprocessing` pipeline-hook point (runs last, after evaluation and "
+        "before the workflow completes). The mirror image of `preprocessing`.",
+    )
 
     # Pricing configuration (optional - loaded separately but can be merged for convenience)
     pricing: Optional[List[PricingEntry]] = Field(
@@ -2633,6 +2665,25 @@ class IDPConfig(BaseModel):
                 data["policy_classes"] = data.pop("rule_classes")
                 logger.info("Migrated config key 'rule_classes' → 'policy_classes'")
             elif "rule_classes" in data:
+                # Both keys present: policy_classes wins and rule_classes is
+                # dropped. Say so loudly — this discards user-supplied rules, and
+                # because 'rule_classes' is a known-deprecated key it does not
+                # trip the unknown-field warning either. Silently losing it is
+                # how hand-written and notebook-produced configs ended up with
+                # rule validation that never fired.
+                discarded = data.get("rule_classes")
+                count = (
+                    len(discarded) if isinstance(discarded, (list, dict)) else 1
+                )
+                logger.warning(
+                    "Both 'rule_classes' (deprecated) and 'policy_classes' are "
+                    "present in this configuration; DISCARDING 'rule_classes' "
+                    "(%d %s). 'rule_classes' was renamed to 'policy_classes' in "
+                    "v0.5.9 — merge these entries into 'policy_classes' or they "
+                    "will not be used.",
+                    count,
+                    "entry" if count == 1 else "entries",
+                )
                 del data["rule_classes"]
 
             # Get all field names defined in the model

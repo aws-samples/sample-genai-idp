@@ -10,7 +10,7 @@ On Create or Update:
      row to InstalledFeatures.
   3. Downloads the bundled config preset (config-preset/pii-preprocessing.yaml,
      uploaded by the publisher under <FEATURE_ARTIFACT_PREFIX>/<FEATURE_VERSION>),
-     INJECTS the preprocessing hook into its preprocessing.preHook, and
+     INJECTS the preprocessing hook into its `preprocessing` section, and
      invokes the host's `applyFeatureConfigPreset` resolver — creating a
      NON-ACTIVE config version `pii-anonymizer-v<FEATURE_VERSION>` for an admin
      to activate. (The hook travels inside the preset, not via a separate
@@ -277,7 +277,7 @@ def _apply_config_preset() -> None:
     the active configuration.
 
     Before sending, we inject the preprocessing hook into the preset's own
-    `preprocessing.preHook` (see _inject_preprocessing_hook) so the hook is part
+    `preprocessing` section (see _inject_preprocessing_hook) so the hook is part
     of the very version the admin activates — no separate registerFeatureHooks
     call, no orphaned hook.
     """
@@ -356,7 +356,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> None:
             # install time (typically `default`); when the admin then activates
             # this feature's preset version, the hook would be orphaned in the
             # old version and never fire. Instead, _apply_config_preset injects
-            # the hook directly into the preset's preprocessing.preHook, so
+            # the hook directly into the preset's `preprocessing` section, so
             # the hook travels with the version that gets activated.
             _apply_config_preset()
         elif request_type == "Delete":

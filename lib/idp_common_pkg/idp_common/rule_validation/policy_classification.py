@@ -20,6 +20,7 @@ from idp_common.config.schema_constants import (
     X_AWS_IDP_DOCUMENT_NAME_REGEX,
     X_AWS_IDP_PAGE_CONTENT_REGEX,
     X_AWS_IDP_POLICY_TYPE,
+    X_AWS_IDP_RULE_TYPE,
 )
 from idp_common.models import Document
 from idp_common.rule_validation.models import PolicyClass, PolicyClassificationResult
@@ -53,7 +54,23 @@ class PolicyClassificationService:
         raw_policy_classes = config_dict.get("policy_classes", [])
 
         for policy_config in raw_policy_classes:
+            # Accept the legacy 'x-aws-idp-rule-type' as a fallback. Raw
+            # rules-discovery output and older hand-written configs carry that
+            # name; keying only on the current one meant such a class was
+            # skipped here AND invisible in the UI, so rule validation silently
+            # never fired with nothing logged to explain why.
             policy_type = policy_config.get(X_AWS_IDP_POLICY_TYPE)
+            if not policy_type:
+                policy_type = policy_config.get(X_AWS_IDP_RULE_TYPE)
+                if policy_type:
+                    logger.warning(
+                        "Policy class '%s' uses the legacy '%s' key; it is being "
+                        "honored, but rename it to '%s' — the Policy Schema UI "
+                        "reads only the current key and will not display it.",
+                        policy_type,
+                        X_AWS_IDP_RULE_TYPE,
+                        X_AWS_IDP_POLICY_TYPE,
+                    )
             if not policy_type:
                 continue
 

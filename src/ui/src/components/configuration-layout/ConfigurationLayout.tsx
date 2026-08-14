@@ -538,7 +538,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [jsonContent, setJsonContent] = useState('');
   const [yamlContent, setYamlContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
   const [validationErrors, setValidationErrors] = useState<{ message: string; path?: string }[]>([]);
@@ -1181,7 +1180,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
     }
 
     setIsSaving(true);
-    setSaveSuccess(false);
     setSaveError(null);
 
     try {
@@ -1498,8 +1496,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
         const descriptionChanged = versionDescription !== (currentVersion?.description || '');
         if (Object.keys(builtObject).length === 0 && !descriptionChanged) {
           console.log('No changes detected, skipping save');
-          setSaveSuccess(true);
-          setTimeout(() => setSaveSuccess(false), 3000);
+          setSuccessMessage('No changes to save.');
           return;
         }
 
@@ -1517,7 +1514,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
       const success = await updateConfiguration(currentVersionName, configToSave, versionDescription);
 
       if (success) {
-        setSaveSuccess(true);
         setSuccessMessage(saveAsDefault ? 'Configuration saved as new default.' : 'Configuration saved successfully.');
         if (saveAsDefault) {
           setShowSaveAsDefaultModal(false);
@@ -1546,7 +1542,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
     }
 
     setIsSaving(true);
-    setSaveSuccess(false);
     setSaveError(null);
 
     try {
@@ -1556,7 +1551,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
       const result = await saveAsNewVersion(builtObject, saveAsVersionName, saveAsVersionDescription);
 
       if (result.success) {
-        setSaveSuccess(true);
         setSuccessMessage(`Saved as new version "${saveAsVersionName}".`);
         setShowSaveAsVersionModal(false);
         setSaveAsVersionName('');
@@ -1617,7 +1611,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   const handleResetAllToDefault = async () => {
     setIsSaving(true);
-    setSaveSuccess(false);
     setSaveError(null);
 
     try {
@@ -1626,7 +1619,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
       const success = await updateConfiguration(currentVersionName, { resetToDefault: true });
 
       if (success) {
-        setSaveSuccess(true);
         setSuccessMessage('Configuration reset to default.');
         setShowResetModal(false);
         // Refresh to show the restored default configuration
@@ -2488,12 +2480,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
             >
               This configuration is managed by the stack and cannot be saved directly. It will be overwritten on stack updates. Use{' '}
               <strong>Save as Version</strong> to create an editable copy.
-            </Alert>
-          )}
-
-          {saveSuccess && (
-            <Alert type="success" dismissible onDismiss={() => setSaveSuccess(false)} header="Configuration saved successfully">
-              Your configuration changes have been saved.
             </Alert>
           )}
 

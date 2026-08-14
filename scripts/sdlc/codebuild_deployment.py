@@ -1315,6 +1315,897 @@ def test_step13_permission_boundaries(stack_name):
         return {"success": False, "error": f"Permission-boundary check failed: {e}"}
 
 
+# ---------------------------------------------------------------------------
+# Step 14: pipeline hooks (preprocessing / postprocessing)
+# ---------------------------------------------------------------------------
+#
+# The pipeline-hook mechanism — the platform's supported way for a feature or an
+# admin to inject business logic into document processing — had NO end-to-end
+# coverage before this step, at any of its seven extension points. Unit tests
+# cover the dispatcher with fakes, but nothing exercised the parts that only
+# exist on a real stack:
+#
+#   * the real dispatcher Lambda reading a hook out of a real config version,
+#   * `UpdateSchemaConfig` actually publishing the hook config sections, so the
+#     fields an admin edits exist in the deployed schema,
+#   * a hook Lambda cleared by the dispatcher's tag/name IAM condition,
+#   * a hook's `updatedDocument` surviving into the PERSISTED document (the
+#     tracking row), not just the state machine's output.
+#
+# It is a genuine gap rather than a theoretical one: a hook that silently never
+# fires looks identical to one that ran and decided to do nothing — the workflow
+# still succeeds, the document still reaches COMPLETED, and the hook Lambda
+# writes no logs. That exact failure mode shipped once already (#599).
+#
+# The test is deliberately self-contained: it creates its own hook Lambda + role,
+# registers the hook in its OWN config version (never the active one, so it
+# cannot disturb the parallel steps sharing this stack), processes one document
+# pinned to that version, then deletes everything it made. A leftover hook ARN
+# would be actively harmful — a stale ARN at a flat point with onError:fail fails
+# every subsequent document — so teardown runs in a `finally`.
+# Naming here has to satisfy TWO different IAM policies at once, which is why it
+# is not simply `GENAIIDP-*`:
+#
+#   * The CI CodeBuild role (scripts/sdlc/cfn/codepipeline-s3.yml) scopes its
+#     `iam:*` to `role/idp-*` and its `lambda:*` to `function:idp-*`. A
+#     `GENAIIDP-` prefixed role or function is AccessDenied — which is exactly
+#     how this step first failed in the pipeline.
+#   * The host dispatcher (patterns/unified/template.yaml) will only invoke a
+#     hook that EITHER is named `GENAIIDP-*` OR carries the `idp:feature-id` tag.
+#
+# So the resources are named `idp-*` for the CI role, and the dispatcher is
+# satisfied via the TAG path instead of the name path. That is also the more
+# representative test: tagging is how installed Feature Platform features clear
+# the check, while the `GENAIIDP-*` name is the admin escape hatch.
+_HOOK_FN_PREFIX = "idp-citest-hook"
+_HOOK_FEATURE_ID = "ci-hook-test"  # value of the idp:feature-id tag
+
+# Marker the hook writes into the document; asserted in the persisted document.
+_HOOK_MARKER_KEY = "ci_hook_marker"
+
+# Inline source for the test hook. Uses `idp_common.hooks` — the documented
+# helper pair — so this doubles as a check that the published contract works
+# against a real stack (a hook built by hand would test our own scaffolding
+# instead of the API we tell feature authors to use).
+_HOOK_SOURCE = '''
+import os
+from idp_common.hooks import load_hook_document, updated_document_result
+
+MARKER_KEY = os.environ["MARKER_KEY"]
+
+
+def lambda_handler(event, context):
+    """Mutate the document so the test can prove the hook ran AND that its
+    change propagated. Reads its own settings from `args`, like a real hook.
+
+    The marker goes into a SECTION's `attributes` (and `summary_report_uri` as a
+    document-level backstop) because those are fields `Document.to_dict()`
+    actually serializes. Note `Document.metadata` is a runtime-only field that
+    to_dict() drops entirely — writing the marker there looks correct and
+    silently never persists.
+    """
+    # WORKING_BUCKET is required to resolve the COMPRESSED document reference the
+    # dispatcher hands over at postprocessing; load_hook_document raises without
+    # it. Read explicitly so a missing env var fails with a clear message here
+    # rather than deep inside idp_common.
+    working_bucket = os.environ.get("WORKING_BUCKET") or ""
+    if not working_bucket:
+        raise RuntimeError(
+            "WORKING_BUCKET is not set on this hook Lambda; a compressed "
+            "document reference cannot be resolved"
+        )
+    document = load_hook_document(event, working_bucket=working_bucket)
+    args = {a["key"]: a.get("value") for a in (event.get("args") or [])}
+    point = event.get("hookPoint")
+
+    marker = {
+        "hookPoint": point,
+        "note": args.get("note", ""),
+        # Proves the hook saw a real, populated document rather than a stub.
+        "saw_sections": len(document.sections or []),
+        "saw_status": str(getattr(document, "status", "")),
+        # HITL fields are omitted when falsy, so absent == no HITL.
+        "saw_hitl_status": (event.get("document") or {}).get("hitl_status"),
+    }
+
+    # postprocessing runs last, so only its marker is the final persisted value;
+    # tag the document-level field with the point so the assertion can tell which
+    # hook wrote it.
+    document.summary_report_uri = f"{MARKER_KEY}:{point}"
+
+    # Section attributes are what a real hook mutates, and they round-trip.
+    # `setdefault`-style write so an existing extraction result is preserved.
+    for section in document.sections or []:
+        if section.attributes is None:
+            section.attributes = {}
+        if isinstance(section.attributes, dict):
+            section.attributes[MARKER_KEY] = marker
+            break
+
+    return updated_document_result(
+        document,
+        working_bucket=working_bucket,
+        ciHookRan=True,
+        ciHookPoint=point,
+    )
+'''
+
+
+def _hook_iam_role(iam, role_name):
+    """Create (idempotently) an execution role for the test hook Lambda.
+
+    Needs basic logs plus read/write on the working bucket: `load_hook_document`
+    resolves a compressed reference from S3, and `updated_document_result` may
+    spill a large document back.
+    """
+    trust = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "lambda.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
+    try:
+        role_arn = iam.create_role(
+            RoleName=role_name, AssumeRolePolicyDocument=trust
+        )["Role"]["Arn"]
+    except iam.exceptions.EntityAlreadyExistsException:
+        role_arn = iam.get_role(RoleName=role_name)["Role"]["Arn"]
+    iam.attach_role_policy(
+        RoleName=role_name,
+        PolicyArn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    )
+    iam.put_role_policy(
+        RoleName=role_name,
+        PolicyName="hook-s3-kms",
+        PolicyDocument=json.dumps(
+            {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": ["s3:GetObject", "s3:PutObject"],
+                        "Resource": "arn:aws:s3:::*/compressed_documents/*",
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "kms:Decrypt",
+                            "kms:Encrypt",
+                            "kms:GenerateDataKey",
+                            "kms:DescribeKey",
+                        ],
+                        "Resource": "*",
+                    },
+                ],
+            }
+        ),
+    )
+    return role_arn
+
+
+def _dump_hook_logs(fn_name, limit=40):
+    """Print the hook Lambda's recent log lines.
+
+    Called only when Step 14 fails. A pipeline round-trip is ~70 minutes, so the
+    single most valuable thing a failure can do is carry the hook's own
+    traceback out with it instead of forcing another cycle to learn one fact.
+    Best-effort: never raises, and says so when there is nothing to show (no log
+    group means the hook was never invoked at all, which is itself the answer).
+    """
+    lg = f"/aws/lambda/{fn_name}"
+    try:
+        logs = boto3.client("logs", config=_THROTTLE_RETRY_CONFIG)
+        streams = logs.describe_log_streams(
+            logGroupName=lg, orderBy="LastEventTime", descending=True, limit=3
+        ).get("logStreams", [])
+        if not streams:
+            print(f"  [diag] no log streams in {lg} — the hook was never invoked")
+            return
+        print(f"  [diag] last log lines from {lg}:")
+        for st in streams[:2]:
+            ev = logs.get_log_events(
+                logGroupName=lg,
+                logStreamName=st["logStreamName"],
+                limit=limit,
+                startFromHead=False,
+            ).get("events", [])
+            for e in ev:
+                msg = (e.get("message") or "").rstrip()
+                if msg:
+                    print(f"    | {msg[:300]}")
+    except Exception as exc:  # noqa: BLE001 — diagnostics must never mask the real failure
+        print(f"  [diag] could not read {lg}: {exc}")
+
+
+def _wait_lambda_ready(lam, fn_name, attempts=20, delay=3):
+    """Block until the function has no update in flight.
+
+    Lambda rejects a second mutating call while one is pending
+    (ResourceConflictException: "The operation cannot be performed at this time.
+    An update is in progress"), so the create -> tag -> configure sequence has to
+    wait between steps.
+    """
+    for _ in range(attempts):
+        try:
+            cfg = lam.get_function_configuration(FunctionName=fn_name)
+        except Exception:  # noqa: BLE001 — transient during creation
+            time.sleep(delay)
+            continue
+        if (
+            cfg.get("State") in (None, "Active")
+            and cfg.get("LastUpdateStatus") in (None, "Successful")
+        ):
+            return True
+        time.sleep(delay)
+    print(f"  ⚠️  {fn_name} still not settled; continuing")
+    return False
+
+
+# How long to keep looking for OUR execution after run-inference returns, and how
+# often to re-check. `--monitor` is not a dependable barrier: it aborts on any
+# internal error and still exits 0, so the step must wait on the thing it
+# actually needs (a SUCCEEDED execution pinned to our config version) rather than
+# on the CLI's say-so. The document takes ~80-120s in practice.
+_TARGET_WAIT_SECS = 600
+_TARGET_POLL_SECS = 20
+
+
+def _find_target_execution(sfn, sm_arn, config_version):
+    """(execution_arn, scanned) for the SUCCEEDED execution pinned to
+    `config_version`, or (None, scanned).
+
+    Identified by the execution INPUT's `document.config_version`, which is exact:
+    only our document is pinned to that version. Matching on hook point instead
+    would latch onto another parallel step's execution, since every execution
+    emits both hook results.
+    """
+    scanned = 0
+    next_token = None
+    while scanned < 300:
+        kwargs = {
+            "stateMachineArn": sm_arn,
+            "statusFilter": "SUCCEEDED",
+            "maxResults": 100,
+        }
+        if next_token:
+            kwargs["nextToken"] = next_token
+        page = sfn.list_executions(**kwargs)
+        for ex in page.get("executions", []):
+            scanned += 1
+            try:
+                raw = sfn.describe_execution(
+                    executionArn=ex["executionArn"]
+                ).get("input") or "{}"
+                doc_in = json.loads(raw).get("document") or {}
+            except (ValueError, TypeError, KeyError):
+                continue
+            if doc_in.get("config_version") == config_version:
+                return ex["executionArn"], scanned
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
+    return None, scanned
+
+
+def _resolve_working_bucket(stack_name):
+    """Physical name of the stack's WorkingBucket.
+
+    The hook Lambda MUST know this: at `postprocessing` the dispatcher hands over
+    a COMPRESSED document reference, and `idp_common.hooks.load_hook_document`
+    raises outright ("carries a compressed document reference but no working
+    bucket was given") unless WORKING_BUCKET is set. There is no stack Output for
+    it — the template only passes it down to nested stacks — so it is resolved
+    from the stack's resources.
+    """
+    cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+    for page in cf.get_paginator("list_stack_resources").paginate(
+        StackName=stack_name
+    ):
+        for r in page.get("StackResourceSummaries", []):
+            if (
+                r.get("ResourceType") == "AWS::S3::Bucket"
+                and r.get("LogicalResourceId") == "WorkingBucket"
+            ):
+                return r.get("PhysicalResourceId") or ""
+    return ""
+
+
+def _hook_lambda_runtime():
+    """Lambda runtime string matching the interpreter building the hook zip.
+
+    Falls back to python3.12 if the build interpreter is outside the range Lambda
+    supports, since a wrong-but-supported runtime at least fails with a clear
+    import error rather than an InvalidParameterValueException at create time.
+    """
+    import sys
+
+    minor = sys.version_info.minor
+    if sys.version_info.major == 3 and 9 <= minor <= 13:
+        return f"python3.{minor}"
+    print(
+        f"  ⚠️  build interpreter python3.{minor} has no matching Lambda runtime; "
+        f"falling back to python3.12"
+    )
+    return "python3.12"
+
+
+def _build_hook_zip(path):
+    """Zip the hook source together with idp_common and its import-time deps.
+
+    `make setup` has already installed idp_common into the build environment, so
+    every package is located by IMPORTING it and walking its real directory,
+    rather than assuming a shared site-packages parent. That matters because the
+    packages are not necessarily siblings: idp_common may be an editable install
+    pointing into the repo while its dependencies live in site-packages, and an
+    earlier version of this helper silently produced a zip with idp_common but
+    NO pydantic — which fails only at Lambda import time, in CI, where it is
+    expensive to debug.
+    """
+    import importlib
+    import zipfile
+
+    # idp_common[core] needs these at import time (config.models imports
+    # pydantic). Deliberately explicit: a broad site-packages sweep would push
+    # the zip past Lambda's 50MB direct-upload limit.
+    # The closure is what `idp_common.hooks` actually pulls in at import time:
+    # load_hook_document -> Document.decompress -> idp_common.utils ->
+    # idp_common.config.models -> configuration_manager, which imports BOTH
+    # pydantic and yaml. Omitting yaml produced a ModuleNotFoundError at cold
+    # start that no offline test caught, so this list is validated by actually
+    # invoking the deployed function (see the zip self-check below and the
+    # dry-run procedure in CI_TEST_COVERAGE.md).
+    required = [
+        "idp_common",
+        "pydantic",
+        "pydantic_core",
+        "annotated_types",
+        "yaml",  # PyYAML — imported by idp_common.config.configuration_manager
+    ]
+    # `_yaml` is PyYAML's optional C extension; boto3/botocore are provided by
+    # the Lambda runtime, so they are deliberately NOT vendored (they would push
+    # the zip past the 50MB direct-upload limit).
+    optional = ["typing_extensions", "typing_inspection", "_yaml"]
+
+    def _add_module(zf, mod_name, required_flag):
+        try:
+            mod = importlib.import_module(mod_name)
+        except ImportError:
+            if required_flag:
+                raise RuntimeError(
+                    f"Cannot build the hook zip: {mod_name!r} is not importable. "
+                    f"Run `make setup` first."
+                ) from None
+            return False
+        src = mod.__file__ or ""
+        if not src:
+            return False
+        # A package (has __init__.py) is added as a directory tree; a bare
+        # module as its single file.
+        if os.path.basename(src).startswith("__init__."):
+            pkg_dir = os.path.dirname(os.path.abspath(src))
+            base = os.path.dirname(pkg_dir)
+            for root, _dirs, files in os.walk(pkg_dir):
+                if "__pycache__" in root:
+                    continue
+                for fn in files:
+                    if fn.endswith((".pyc", ".pyo")):
+                        continue
+                    full = os.path.join(root, fn)
+                    zf.write(full, os.path.relpath(full, base))
+        else:
+            zf.write(os.path.abspath(src), os.path.basename(src))
+        return True
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("index.py", _HOOK_SOURCE)
+        for name in required:
+            _add_module(zf, name, True)
+        for name in optional:
+            _add_module(zf, name, False)
+
+    # Fail loudly here rather than at Lambda cold start: a zip missing pydantic
+    # imports fine locally and dies with ModuleNotFoundError only in CI.
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        expected = ["index.py", "idp_common/hooks/__init__.py"]
+        # Every REQUIRED third-party package must be present, not just a
+        # hand-picked one: the yaml omission slipped through a pydantic-only check.
+        expected += [f"{pkg}/" for pkg in required if pkg != "idp_common"]
+        for want in expected:
+            if not any(n == want or n.startswith(want) for n in names):
+                raise RuntimeError(
+                    f"Hook zip is missing {want!r} — the Lambda would fail at "
+                    f"import time ({len(names)} entries built)"
+                )
+    return path
+
+
+def test_step14_pipeline_hooks(stack_name):
+    """Step 14: End-to-end pipeline-hook test (postprocessing + preprocessing).
+
+    Deploys a real hook Lambda, registers it in a DEDICATED config version at
+    both standalone hook points, processes one document pinned to that version,
+    and asserts four things that only a live stack can show:
+
+      1. the hook sections survive the config write/read round-trip, so the
+         dispatcher has something to call (and the deployed schema carries them);
+      2. the dispatcher actually INVOKED the hook at BOTH points (`invoked >= 1`
+         in the state machine's `HookResults`, plus the config version it
+         resolved) — the assertion that distinguishes "ran and did nothing" from
+         "never called";
+      3. the `updatedDocument` was ACCEPTED rather than refused by the
+         dispatcher's guardrails (`documentUpdatedBy` non-empty);
+      4. the mutation reached the PERSISTED document (the tracking row), and is
+         the POSTPROCESSING marker — i.e. the last writer won.
+
+    Uses its own config version, so it never perturbs the parallel steps sharing
+    this stack. Everything it creates is removed in `finally`.
+    """
+    print("Step 14: Testing pipeline hooks end-to-end...")
+
+    config_version = "test-pipeline-hooks"
+    suffix = stack_name.split("-")[-1][:8].lower() or "ci"
+    fn_name = f"{_HOOK_FN_PREFIX}-{suffix}"
+    role_name = f"{fn_name}-role"
+    zip_path = "/tmp/citest-hook.zip"  # nosec B108
+    lam = boto3.client("lambda", config=_THROTTLE_RETRY_CONFIG)
+    iam = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
+    created_fn = created_role = False
+    outcome = {"ok": False}
+
+    try:
+        import yaml
+
+        # --- 1. Deploy the hook Lambda -------------------------------------
+        working_bucket = _resolve_working_bucket(stack_name)
+        if not working_bucket:
+            return {
+                "success": False,
+                "error": (
+                    f"Could not resolve the WorkingBucket for {stack_name}; the "
+                    f"hook cannot resolve compressed document references without it"
+                ),
+            }
+        print(f"  Creating hook Lambda {fn_name} (working bucket {working_bucket})...")
+        role_arn = _hook_iam_role(iam, role_name)
+        created_role = True
+        _build_hook_zip(zip_path)
+        # IAM role propagation to Lambda is eventually consistent.
+        time.sleep(12)
+        with open(zip_path, "rb") as f:
+            code = f.read()
+        for attempt in range(5):
+            try:
+                lam.create_function(
+                    FunctionName=fn_name,
+                    # Match the runtime to the interpreter that BUILT the zip.
+                    # pydantic_core ships a compiled extension
+                    # (_pydantic_core.cpython-3XX-*.so), so a zip built on 3.12
+                    # and run on a 3.13 Lambda (or vice versa) fails at cold
+                    # start with an opaque ModuleNotFoundError. Hardcoding 3.12
+                    # happens to match today's buildspec, but would break
+                    # silently the day that buildspec's python is bumped.
+                    Runtime=_hook_lambda_runtime(),
+                    Role=role_arn,
+                    Handler="index.lambda_handler",
+                    Code={"ZipFile": code},
+                    Timeout=120,
+                    MemorySize=512,
+                    Environment={
+                        "Variables": {
+                            "MARKER_KEY": _HOOK_MARKER_KEY,
+                            "WORKING_BUCKET": working_bucket,
+                        }
+                    },
+                    # Load-bearing, not metadata: the dispatcher's ABAC
+                    # condition (StringLike aws:ResourceTag/idp:feature-id)
+                    # is the ONLY thing authorizing it to invoke a function
+                    # not named GENAIIDP-*. Without this tag every dispatch
+                    # fails closed with AccessDenied.
+                    Tags={"idp:feature-id": _HOOK_FEATURE_ID},
+                )
+                created_fn = True
+                break
+            except lam.exceptions.ResourceConflictException:
+                lam.update_function_code(FunctionName=fn_name, ZipFile=code)
+                created_fn = True
+                break
+            except Exception as exc:  # noqa: BLE001 — role not yet assumable
+                if attempt == 4:
+                    raise
+                print(f"    create_function retry {attempt + 1}: {exc}")
+                time.sleep(10)
+        hook_arn = (
+            lam.get_function(FunctionName=fn_name)
+            .get("Configuration", {})
+            .get("FunctionArn", "")
+        )
+        if not hook_arn:
+            return {
+                "success": False,
+                "error": f"Could not resolve the ARN of hook Lambda {fn_name}",
+            }
+        # Tag AND set the environment unconditionally rather than relying on
+        # create_function's Tags/Environment: the ResourceConflictException path
+        # above reuses a function left by an interrupted earlier run, and
+        # update_function_code sets NEITHER. An untagged function fails every
+        # dispatch closed with AccessDenied; one without WORKING_BUCKET raises
+        # inside load_hook_document the moment it is handed a compressed
+        # document reference (which is what `postprocessing` always gets).
+        lam.tag_resource(
+            Resource=hook_arn, Tags={"idp:feature-id": _HOOK_FEATURE_ID}
+        )
+        _wait_lambda_ready(lam, fn_name)
+        lam.update_function_configuration(
+            FunctionName=fn_name,
+            Environment={
+                "Variables": {
+                    "MARKER_KEY": _HOOK_MARKER_KEY,
+                    "WORKING_BUCKET": working_bucket,
+                }
+            },
+        )
+        _wait_lambda_ready(lam, fn_name)
+        env_now = (
+            lam.get_function_configuration(FunctionName=fn_name)
+            .get("Environment", {})
+            .get("Variables", {})
+        )
+        if env_now.get("WORKING_BUCKET") != working_bucket:
+            return {
+                "success": False,
+                "error": (
+                    f"Hook Lambda {fn_name} has WORKING_BUCKET="
+                    f"{env_now.get('WORKING_BUCKET')!r}, expected "
+                    f"{working_bucket!r}; load_hook_document would raise on the "
+                    f"compressed document reference it receives"
+                ),
+            }
+        tags = lam.list_tags(Resource=hook_arn).get("Tags", {})
+        if tags.get("idp:feature-id") != _HOOK_FEATURE_ID:
+            return {
+                "success": False,
+                "error": (
+                    f"Hook Lambda {fn_name} is missing the idp:feature-id tag "
+                    f"(got {tags!r}); the dispatcher would fail closed with "
+                    f"AccessDenied because the function is not named GENAIIDP-*"
+                ),
+            }
+        print(f"  ✓ Hook Lambda ready: {hook_arn} (tagged idp:feature-id)")
+
+        # --- 2. Register the hook in a DEDICATED config version ------------
+        # Start from the stack's own default config so the version is valid.
+        base = "/tmp/citest-hook-config.yaml"  # nosec B108
+        run_command(
+            f"idp-cli config-download --stack-name {stack_name} "
+            f"--config-version default --output {base}",
+            check=True,
+        )
+        with open(base, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+
+        # Assertion 3: the deployed SCHEMA must expose these sections. Checked
+        # against the downloaded config's own shape below (see schema check).
+        for point in ("preprocessing", "postprocessing"):
+            cfg[point] = {
+                "enabled": True,
+                # Same id as the Lambda's idp:feature-id tag, so the config and
+                # the ABAC grant cannot drift apart.
+                "featureId": _HOOK_FEATURE_ID,
+                "arn": hook_arn,
+                # `continue` on BOTH points: a hook fault must not fail the
+                # document and turn a coverage test into a flaky gate. The
+                # invoked-count assertion is what proves it ran.
+                "onError": "continue",
+                "args": [{"key": "note", "value": f"ci-{point}"}],
+                "allowDocumentUpdate": True,
+            }
+        with open(base, "w") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False)
+
+        run_command(
+            f"idp-cli config-upload --stack-name {stack_name} "
+            f"--config-file {base} --config-version {config_version}",
+            check=True,
+        )
+        # Round-trip check: the flat hook sections must survive the config
+        # write/read path (they are dropped if a model field is missing —
+        # exactly the regression the config-model tests guard offline).
+        rt = "/tmp/citest-hook-config-rt.yaml"  # nosec B108
+        run_command(
+            f"idp-cli config-download --stack-name {stack_name} "
+            f"--config-version {config_version} --output {rt}",
+            check=True,
+        )
+        with open(rt, "r") as f:
+            rt_cfg = yaml.safe_load(f) or {}
+        for point in ("preprocessing", "postprocessing"):
+            section = rt_cfg.get(point) or {}
+            if section.get("arn") != hook_arn:
+                return {
+                    "success": False,
+                    "error": (
+                        f"{point} hook did not survive the config round-trip "
+                        f"(arn={section.get('arn')!r}) — the dispatcher would "
+                        f"find no hook to call"
+                    ),
+                }
+        print("  ✓ Both hook sections survived the config round-trip")
+
+        # --- 3. Process a document pinned to that version ------------------
+        print("  Processing a document with the hook registered...")
+        batch_id = "test-pipeline-hooks"
+        # `--dir` takes a DIRECTORY (file_okay=False) and run-inference has no
+        # short flags at all, so `-d <file>` is rejected outright. Select the one
+        # document with --file-pattern, exactly as Steps 6/8 do.
+        run_command(
+            f"idp-cli run-inference --stack-name {stack_name} "
+            f"--dir samples/ --file-pattern lending_package.pdf "
+            f"--batch-id {batch_id} "
+            f"--config-version {config_version} --monitor",
+            check=True,
+            timeout=900,
+        )
+
+        # --- 4. Assert the dispatcher INVOKED the hook ---------------------
+        cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+        outputs = {
+            o["OutputKey"]: o["OutputValue"]
+            for o in cf.describe_stacks(StackName=stack_name)["Stacks"][0].get(
+                "Outputs", []
+            )
+        }
+        sm_arn = outputs.get("StateMachineArn", "")
+        if not sm_arn:
+            return {
+                "success": False,
+                "error": "StateMachineArn missing from stack outputs",
+            }
+
+        # Locate OUR execution, then read its history IN FULL.
+        #
+        # Two traps here, both hit in real pipeline runs:
+        #
+        # 1. Step 14 shares this state machine with the other parallel steps, and
+        #    since PreprocessingHook is StartAt and PostprocessingHook is on the
+        #    shared tail, EVERY execution emits both hook results (invoked=0 for a
+        #    hook-less config). Matching on hook point alone latches onto a
+        #    foreign execution. So the target execution is identified by its
+        #    INPUT's config_version — only our document is pinned to it — via a
+        #    cheap describe_execution, with no history scan at all.
+        #
+        # 2. get_execution_history(reverseOrder=True, maxResults=200) returns the
+        #    NEWEST 200 events. PreprocessingHook is the FIRST task, so on any
+        #    execution with >200 events (a multi-section document — measured at
+        #    240 events for one real doc) that window never reaches it, while
+        #    PostprocessingHook near the end is always found. That asymmetry is
+        #    exactly the "No preprocessing dispatcher result" failure. The history
+        #    is therefore paginated FORWARD and in full.
+        sfn = boto3.client("stepfunctions", config=_THROTTLE_RETRY_CONFIG)
+
+        # Do NOT trust `--monitor` as the barrier. It aborts on any internal
+        # error and still exits 0 — a missing DocumentState enum value made it
+        # bail after 21s with "Monitoring error: 1 validation error for
+        # DocumentStatus", so the scan ran while the document was still QUEUED
+        # and reported a false "no execution found". Poll for our execution
+        # until it appears, up to a deadline.
+        target_arn = None
+        scanned = 0
+        deadline = time.time() + _TARGET_WAIT_SECS
+        while True:
+            target_arn, scanned = _find_target_execution(sfn, sm_arn, config_version)
+            if target_arn or time.time() > deadline:
+                break
+            print(
+                f"  (our execution not SUCCEEDED yet; scanned {scanned}, "
+                f"retrying in {_TARGET_POLL_SECS}s)"
+            )
+            time.sleep(_TARGET_POLL_SECS)
+
+        if not target_arn:
+            return {
+                "success": False,
+                "error": (
+                    f"No SUCCEEDED execution found whose input pins "
+                    f"config_version={config_version!r} (scanned {scanned}) within "
+                    f"{_TARGET_WAIT_SECS}s. The document either failed to process "
+                    f"or was not pinned to that version by run-inference "
+                    f"--config-version."
+                ),
+            }
+        print(f"  ✓ found our execution ({scanned} scanned): {target_arn.rsplit(':', 1)[-1]}")
+
+        found = {}
+        hist_token = None
+        pages = 0
+        while pages < 12:
+            hkw = {"executionArn": target_arn, "maxResults": 1000}
+            if hist_token:
+                hkw["nextToken"] = hist_token
+            hist = sfn.get_execution_history(**hkw)
+            for event in hist.get("events", []):
+                det = event.get("taskSucceededEventDetails") or {}
+                out = det.get("output") or ""
+                if '"hookPoint"' not in out:
+                    continue
+                try:
+                    payload = json.loads(out).get("Payload") or {}
+                except (ValueError, TypeError):
+                    continue
+                point = payload.get("hookPoint")
+                if point in ("preprocessing", "postprocessing"):
+                    found[point] = payload
+            hist_token = hist.get("nextToken")
+            pages += 1
+            if not hist_token:
+                break
+        print(f"  (read {pages} history page(s); hook points found: {sorted(found)})")
+
+        for point in ("preprocessing", "postprocessing"):
+            payload = found.get(point)
+            if not payload:
+                return {
+                    "success": False,
+                    "error": (
+                        f"No {point} dispatcher result for configVersion "
+                        f"{config_version!r} in {scanned} scanned SUCCEEDED "
+                        f"execution(s) — either the {point} hook state is not "
+                        f"wired into the state machine, or our document's "
+                        f"execution did not resolve that config version"
+                    ),
+                }
+            if payload.get("invoked", 0) < 1:
+                return {
+                    "success": False,
+                    "error": (
+                        f"{point} dispatcher reported invoked=0 (resolved "
+                        f"configVersion={payload.get('configVersion')!r}); the "
+                        f"hook was registered in {config_version!r} but never "
+                        f"called"
+                    ),
+                }
+            print(
+                f"  ✓ {point}: invoked={payload['invoked']} "
+                f"configVersion={payload.get('configVersion')!r}"
+            )
+
+        # --- 5. Assert the mutation reached the PERSISTED document ---------
+        # postprocessing is the last writer, so its marker is the one that must
+        # survive into the tracking row.
+        post = found["postprocessing"]
+        if not post.get("documentUpdatedBy"):
+            return {
+                "success": False,
+                "error": (
+                    "postprocessing hook ran but the dispatcher recorded no "
+                    "documentUpdatedBy — its updatedDocument was refused "
+                    f"(results={json.dumps(post.get('results'))[:400]})"
+                ),
+            }
+        print(f"  ✓ document updated by {post['documentUpdatedBy']}")
+
+        # The marker must appear in the PERSISTED document, and must be the
+        # POSTPROCESSING one: both hooks write `summary_report_uri`, so the value
+        # that survives proves the LAST writer's mutation is what got persisted.
+        marker_seen = _find_marker_in_tracking(stack_name, outputs)
+        if not marker_seen:
+            return {
+                "success": False,
+                "error": (
+                    f"Hook ran and its update was accepted, but no tracking row "
+                    f"carries SummaryReportUri starting with {_HOOK_MARKER_KEY!r} "
+                    f"— the mutation did not survive into the persisted document"
+                ),
+            }
+        if "postprocessing" not in marker_seen:
+            return {
+                "success": False,
+                "error": (
+                    f"The persisted marker is not the postprocessing one "
+                    f"({marker_seen}) — the final document does not reflect the "
+                    f"LAST hook to run"
+                ),
+            }
+        print(f"  ✓ marker persisted to the tracking row: {marker_seen}")
+
+        print("✅ Pipeline-hook end-to-end test passed (preprocessing + postprocessing)")
+        outcome["ok"] = True
+        return {"success": True}
+
+    except Exception as e:  # noqa: BLE001
+        print(f"❌ Pipeline-hook test failed: {e}")
+        return {"success": False, "error": f"Pipeline-hook test failed: {e}"}
+
+    finally:
+        # On failure, carry the hook's own logs out with the error — a pipeline
+        # round-trip is ~70 minutes, so guessing costs far more than dumping.
+        if not outcome["ok"] and created_fn:
+            _dump_hook_logs(fn_name)
+        # Teardown is NOT optional: a leftover hook ARN pointing at a deleted
+        # Lambda is exactly the stale-ARN state that fails every subsequent
+        # document at a flat hook point. The config version is disposable (never
+        # activated), but the Lambda + role must go.
+        if created_fn:
+            try:
+                lam.delete_function(FunctionName=fn_name)
+                print(f"  ✓ deleted hook Lambda {fn_name}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  ⚠️  could not delete hook Lambda {fn_name}: {exc}")
+        if created_role:
+            for call, kwargs in (
+                (iam.delete_role_policy, {"RoleName": role_name, "PolicyName": "hook-s3-kms"}),
+                (
+                    iam.detach_role_policy,
+                    {
+                        "RoleName": role_name,
+                        "PolicyArn": "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                    },
+                ),
+                (iam.delete_role, {"RoleName": role_name}),
+            ):
+                try:
+                    call(**kwargs)
+                except Exception:  # noqa: BLE001 — best-effort teardown
+                    pass
+            print(f"  ✓ deleted hook role {role_name}")
+
+
+def _find_marker_in_tracking(stack_name, outputs):
+    """Return the persisted marker value from the tracking row, or None.
+
+    The hook writes its marker to `summary_report_uri`, which the DynamoDB
+    document service persists as the `SummaryReportUri` attribute. That choice is
+    deliberate: the tracking row stores only a REDUCED view of each section
+    (`Id`/`Class`/`PageIds`/`OutputJSONUri`) and drops section `attributes`
+    entirely, so a marker written only into section attributes proves the
+    in-flight mutation but can never be observed here. `Document.metadata` is
+    worse still — `to_dict()` drops it before serialization.
+
+    Checks the `SummaryReportUri` attribute explicitly rather than string-matching
+    the whole item, so a failure says which document was found and what it held.
+    """
+    table_name = outputs.get("TrackingTableName")
+    if not table_name:
+        # Not exported by every template revision; fall back to a resource lookup.
+        cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+        for page in cf.get_paginator("list_stack_resources").paginate(
+            StackName=stack_name
+        ):
+            for r in page.get("StackResourceSummaries", []):
+                if (
+                    r.get("ResourceType") == "AWS::DynamoDB::Table"
+                    and r.get("LogicalResourceId") == "TrackingTable"
+                ):
+                    table_name = r.get("PhysicalResourceId")
+                    break
+    if not table_name:
+        print("  ⚠️  could not locate the tracking table")
+        return None
+
+    ddb = boto3.client("dynamodb", config=_THROTTLE_RETRY_CONFIG)
+    for page in ddb.get_paginator("scan").paginate(
+        TableName=table_name,
+        # filtered-scan-ok: bounded to a fresh smoke-test stack, and the
+        # paginator pages to completion, so no match can be missed.
+        FilterExpression="begins_with(PK, :p)",
+        ExpressionAttributeValues={":p": {"S": "doc#"}},
+        PaginationConfig={"MaxItems": 500},
+    ):
+        for item in page.get("Items", []):
+            uri = (item.get("SummaryReportUri") or {}).get("S") or ""
+            if uri.startswith(_HOOK_MARKER_KEY):
+                pk = (item.get("PK") or {}).get("S", "?")
+                # postprocessing runs last, so it must be the final writer.
+                return f"{pk} -> SummaryReportUri={uri!r}"
+    return None
+
+
 # Single source of truth for the smoke-test suite: (func, step, name,
 # description). The parallel runner, the success summary, and the AI
 # failure-analysis prompt are all derived from this list — add or remove a
@@ -1385,6 +2276,16 @@ PARALLEL_TEST_STEPS = [
         "Step 13",
         "Permission boundaries",
         "IAM permissions boundaries attached to deployed roles",
+    ),
+    # Step 14: pipeline hooks. Safe in the parallel pool — it registers its hook
+    # in its OWN config version and never activates it, so the other steps
+    # (which use `default` or their own versions) are unaffected. It does create
+    # a Lambda + role, both removed in its own `finally`.
+    (
+        test_step14_pipeline_hooks,
+        "Step 14",
+        "Pipeline hooks",
+        "Pipeline hooks end-to-end (preprocessing + postprocessing, mutation persisted)",
     ),
 ]
 # Step 12 stays sequential: its dynamic RBAC harness temporarily flips
@@ -3570,8 +4471,13 @@ def validate_zap_dast(stack_name):
     # the container's non-root user can write the report. (Contents are a
     # throwaway OpenAPI seed + ZAP reports — no secrets; the token lives in a
     # separate options file, also 0o777 here but never uploaded.)
+    # nosec B103 - accepted: the report is written by the ZAP image's non-root
+    # `zap` user, whose uid we don't control, into this root-owned bind mount,
+    # so a narrower mask makes the scan fail (see the comment above). Scope is a
+    # throwaway per-run mkdtemp dir in a single-tenant, ephemeral CodeBuild
+    # container holding only an OpenAPI seed and ZAP reports.
     workdir = tempfile.mkdtemp(prefix="zap-")
-    os.chmod(workdir, 0o777)
+    os.chmod(workdir, 0o777)  # nosec B103
     email = "zap-dast@example.invalid"
     password = "Aa1!" + secrets.token_urlsafe(24)
     token = None
@@ -3581,7 +4487,11 @@ def validate_zap_dast(stack_name):
         rbac_common.enable_admin_auth(ctx)
         rbac_common.create_cognito_user(ctx, email, "Admin", password)
         token = rbac_common.get_id_token(ctx, email, password)
-        if not token or token == "None":
+        # nosec B105 - the "None" literal is the string the AWS CLI prints for a
+        # null `--query` result (`--output text`), i.e. the sentinel for "no
+        # token was minted", not a credential. Bandit's heuristic fires only
+        # because the compared variable is named `token`.
+        if not token or token == "None":  # nosec B105
             return {"success": False, "error": "Failed to mint Cognito ID token"}
 
         fields = _zap_op_fields()

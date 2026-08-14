@@ -36,9 +36,15 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # `github.base_ref` is attacker-controllable (a fork can name its branch
+      # anything), so it must never be interpolated straight into `run:` where
+      # the shell would evaluate it. Pass it through `env:` and quote the
+      # expansion instead.
       - name: Fetch base branch
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
-          git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           git branch -a
 
       - name: Set up environment
@@ -47,10 +53,14 @@ jobs:
           apt-get update -y
           apt-get install make curl -y
 
+      # Use the first-party pinned action rather than
+      # `curl -LsSf https://astral.sh/uv/install.sh | sh`: piping a remote
+      # script into a shell executes whatever the endpoint serves, and the
+      # pipeline also hid failures (it exited with sh's status, not curl's).
+      # The action also puts uv on PATH itself — the old step appended a
+      # `$HOME/.cargo/bin` that recent uv installers no longer use.
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.3.1
 
       - name: Create virtual environment
         run: |
@@ -82,8 +92,10 @@ jobs:
         run: make lint-cicd
 
       - name: Run type checking
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          TARGET_BRANCH="${{ github.base_ref }}"
+          TARGET_BRANCH="$BASE_REF"
           echo "=== Type Checking Configuration ==="
           echo "PR target branch (github.base_ref): $TARGET_BRANCH"
           echo "Comparing: origin/$TARGET_BRANCH...HEAD"

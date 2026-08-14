@@ -414,7 +414,11 @@ def handler(event, context):
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table(table_name)
         
-        # Scan for one doc# item to check which attributes need backfilling
+        # Scan for one doc# item to check which attributes need backfilling.
+        # filtered-scan-ok: a deliberate one-item SAMPLE, not a search for a
+        # specific row — any doc# item answers "has the backfill already run?",
+        # and the state machine re-checks per segment. Paginating here would just
+        # cost a full table scan to learn the same thing.
         response = table.scan(
             FilterExpression="begins_with(PK, :prefix)",  # nosemgrep: python.aws-lambda.security.tainted-sql-string.tainted-sql-string - DynamoDB FilterExpression with hardcoded value, not SQL
             ExpressionAttributeValues={":prefix": "doc#"},

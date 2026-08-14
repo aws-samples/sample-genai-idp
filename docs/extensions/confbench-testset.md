@@ -27,7 +27,10 @@ Because the ground-truth schema is byte-identical to `realkie-fcc-verified`,
 accuracy on any degraded variant is **directly comparable** to the clean
 baseline. That comparability is the whole point of the benchmark.
 
-https://github.com/user-attachments/assets/44be46d8-4817-4d71-a875-8fa725aaf247
+
+
+https://github.com/user-attachments/assets/0b164e6d-c694-4127-8be9-45ec7fd41bee
+
 
 
 ## Why this is an extension, not a pre-deployed test set
@@ -203,3 +206,4 @@ transfer and ground-truth baseline format are carried over from it.
 - Augmentation library: [Augraphy](https://github.com/sparkfish/augraphy)
 - Source: [`feature-platform/confbench-testset/`](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/tree/main/feature-platform/confbench-testset)
 - [Test Studio](../test-studio.md) · [Feature Platform](../feature-platform.md)
+- [Can You Trust the Confidence? ConfBench for Vision-Language Models on Document Extraction](https://arxiv.org/abs/2608.01792)

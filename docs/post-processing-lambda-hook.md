@@ -9,6 +9,35 @@ SPDX-License-Identifier: MIT-0
 
 The GenAIIDP solution supports an optional post-processing Lambda hook that enables custom downstream processing of document extraction results. This integration allows you to automatically trigger custom workflows, notifications, or data transformations immediately after a document is successfully processed.
 
+## Two post-processing mechanisms — which one do I want?
+
+There are **two** independent ways to run your own code after a document is
+processed. Both are supported; they solve different problems.
+
+| | **EventBridge hook** (this page) | **`postprocessing` pipeline hook** |
+|---|---|---|
+| Configured by | Stack deployer, via the `PostProcessingLambdaHookFunctionArn` CloudFormation parameter | Admin, per **configuration version** (View/Edit Configuration UI, under **Postprocessing**) |
+| Changing the target | Requires a stack update | Activate a different config version, or edit the section |
+| When it runs | **After** the workflow execution finishes, out-of-band | **Inside** the workflow, after evaluation and before the terminal state |
+| Invocation | Asynchronous (`Event`) — fire-and-forget | Synchronous (`RequestResponse`) via the pipeline-hooks dispatcher |
+| Can modify the document | **No** — it gets a snapshot; nothing reads its return value | **Yes** — return `updatedDocument`; it becomes the workflow output and is persisted |
+| Can fail/gate the document | No | Yes, with `onError: fail` |
+| Adds to document latency / holds a concurrency slot | **No** | **Yes** |
+| Multiple hooks, ordering, `args`, `enabled` toggle | No — one ARN | `args` + `enabled` (single hook per point) |
+| Error visibility | Decompressor DLQ + your own async DLQ | Step Functions execution history, under `$.HookResults.postprocessing` |
+| Best for | Long-running or fire-and-forget downstream delivery (ERP/SAP push, notifications, archival) that must never extend processing time or fail a document | Enriching, validating, gating, or finalizing the document itself |
+
+**Rule of thumb:** if your code *inspects, changes, or gates* the document, use
+the `postprocessing` pipeline hook — see
+[Feature Platform → Pipeline hooks](feature-platform.md#pipeline-hooks). If it
+*ships results somewhere else* and you don't want it on the critical path, use
+the EventBridge hook documented below.
+
+> **Don't register the same Lambda in both.** It would be invoked twice, with two
+> different payload shapes (the pipeline dispatcher sends
+> `{hookPoint, document, args, argsMap, ...}`; this mechanism sends the
+> EventBridge envelope with `detail.input` / `detail.output`).
+
 ## How It Works
 
 1. **Document Processing Complete**
@@ -70,6 +99,36 @@ flowchart LR
 > **Payload Format**: The event payload structure remains unchanged from the original implementation. All document data, including sections, pages, and attributes, is provided in the standard format documented below.
 
 > **Performance**: The decompression step adds minimal latency (typically < 1 second) and is transparent to your custom lambda function.
+
+> **Very large documents fall back to the compressed reference**: the handoff to
+> your Lambda is an **asynchronous** invoke, which AWS caps at **1 MB** (the
+> 6 MB limit applies only to synchronous invokes). When a decompressed document
+> exceeds that, the decompressor invokes your function with the **original,
+> compressed** event instead of failing — so the hook still fires. In that case
+> `detail.output`'s document is a `{"compressed": true, "s3_uri": ..., ...}`
+> reference you resolve yourself — `idp_common.models.Document.load_document`,
+> or a plain S3 `GET` of that key (the object is uncompressed JSON despite the
+> `compressed: true` flag, which refers to the *event payload* being a reference
+> rather than the S3 object being gzipped). The decompressor logs a warning naming
+> the size, and its response body carries `sentCompressedFallback: true`. A hook
+> that must handle arbitrarily large documents should therefore check for
+> `document.compressed` before assuming inflated data.
+
+> **Superseded originals are skipped**: when the [PII Anonymization
+> extension](extensions/pii-anonymizer.md) (or any `preprocessing` hook) halts a
+> document after spawning a redacted copy, that execution still ends as
+> `SUCCEEDED`. Your hook is **not** invoked for it — the document's status is
+> `REDACTED_SUPERSEDED`, and handing you the un-redacted original would defeat
+> the redaction. The redacted copy is processed as its own document and fires the
+> hook normally.
+
+> **HITL documents fire the hook twice**: with Human-in-the-Loop review enabled,
+> the workflow completes while review is pending (so the hook fires with
+> `hitl_status: "PendingReview"`), and the document is re-queued after review
+> completes (firing the hook again with the reviewed results). Check
+> `document.hitl_status` — it is `PendingReview` | `InProgress` | `Completed` |
+> `Skipped`, and is **absent** when HITL never triggered — and make your handler
+> idempotent.
 
 ## Configuration
 

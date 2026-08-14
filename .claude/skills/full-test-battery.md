@@ -47,7 +47,7 @@ Per-suite (isolated) — `PP=/home/ec2-user/projects/idp1/lib/idp_common_pkg`:
 |-------|---------|--------------------------------|
 | idp_common unit | `cd lib/idp_common_pkg && PYTHONPATH=$PP pytest tests/unit -q -p no:cacheprovider` | ~2214 pass, **26 fail (all pre-existing — see below)** |
 | idp_cli | `cd lib/idp_cli_pkg && pytest -q` | ~139 pass |
-| idp_sdk | `cd lib/idp_sdk && pytest -m "not integration" -q` | ~154 pass |
+| idp_sdk | `cd lib/idp_sdk && pytest -m "not integration" -q` | ~292 pass, **0 fail** (was 279 pass / 8 fail until the suite's `conftest` put the in-repo `idp_common` on `sys.path` — `test_config_operations.py` patches `idp_common.config.merge_utils.*` and cannot run without it) |
 | idp_feature_sdk | `cd lib/idp_feature_sdk && pytest -q` | ~64 pass (slow, ~65s) |
 | feature platform | `cd feature-platform/main-stack-extensions && pytest -q` | ~90 pass |
 | config library | `pytest config_library/test_config_library.py -q` | ~95 pass |

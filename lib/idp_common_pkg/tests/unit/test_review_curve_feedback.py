@@ -206,6 +206,8 @@ class TestCurveFeedback:
             "plain/a.pdf", "1", json.dumps({"inference_result": {"x": 1}})
         )
         # No curve item was created for any set.
+        # filtered-scan-ok: a test fixture holding a handful of items, asserting
+        # emptiness — there is no second page to miss.
         scanned = table.scan(
             FilterExpression="begins_with(SK, :sk)",
             ExpressionAttributeValues={":sk": "curve#"},
@@ -370,6 +372,7 @@ class TestConfirmWithoutEdits:
         module, table, s3 = review_env
         table.put_item(Item={"PK": "doc#plain/a.pdf", "SK": "none"})
         module.confirm_test_set_baseline_reviewed("plain/a.pdf", "1", "someone")
+        # filtered-scan-ok: as above — a two-item fixture, asserting emptiness.
         scanned = table.scan(
             FilterExpression="begins_with(SK, :sk)",
             ExpressionAttributeValues={":sk": "curve#"},

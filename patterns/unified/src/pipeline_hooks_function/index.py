@@ -5,11 +5,9 @@
 
 Invoked by the host's Step Functions workflow at each pipeline extension
 point (preprocessing, postOcr, postClassification, postExtraction,
-postRuleValidation, postSummarization). Reads the active configuration
-version from the host's ConfigurationTable and dispatches to the hook
-Lambdas listed under that section's hook-list field. The field is chosen
-by the hook point prefix: `pre*` points read `preHook`, `post*` points
-read `postHook`.
+postRuleValidation, postSummarization, postprocessing). Reads the active
+configuration version from the host's ConfigurationTable and dispatches to
+the hook Lambda(s) registered for that point.
 
 Hooks are stored *inline in the active config version* — under each
 section — so that activating a different config version atomically swaps
@@ -32,10 +30,16 @@ the hook set:
         postHook: [ ... ]
       summarization:
         postHook: [ ... ]
+      postprocessing:           # standalone section — runs LAST, after
+        enabled: true           # evaluation. Same SINGLE flat-hook shape as
+        arn: <lambda-arn>       # `preprocessing`, deliberately symmetrical.
+        onError: continue
+        args: [ { key, value }, ... ]
 
 The dispatcher's return value includes a top-level `halt` flag (true if any
-successful hook returned result.halt == true) so the workflow's post-hook
-Choice can short-circuit the execution via a stable JSONPath.
+successful hook returned result.halt == true, at a point where halting is
+meaningful — see _HALT_CAPABLE_POINTS) so the workflow's post-hook Choice can
+short-circuit the execution via a stable JSONPath.
 
 It ALSO always includes a top-level `document` — the document the next
 workflow step should consume. A hook that wants to change the document for
@@ -51,6 +55,15 @@ Resolution rules:
   1. If the SFN input has `document.config_version`, use it.
   2. Else, scan the table for the row with IsActive=true.
   3. Else, fall back to `Config#default`.
+
+Step 1 is the normal path: the queue processor pins `config_version` on every
+document before starting the execution (see src/lambda/queue_processor), and
+Document.compress() carries it in the lightweight wrapper specifically so this
+dispatcher can honor it without decompressing. Steps 2-3 are a DEFENSIVE
+fallback for the narrow cases that still arrive unpinned — a DynamoDB failure
+during pinning, or a document queued by an older release. They are not dead
+code, but reaching them is worth noticing, which is why step 3 logs at WARNING
+and the returned payload always names the version actually used.
 
 Returns immediately when the requested step has no `postHook` entries,
 keeping the no-vertical-pack overhead at one DDB GetItem.
@@ -140,16 +153,21 @@ _REQUIRED_WRAPPER_FIELDS = ("num_pages", "status", "sections")
 
 # Map hook point -> config section under the active config version.
 #
-# The hook LIST field within that section is chosen by the hook point's
-# prefix: `pre*` points read `<section>.preHook`, `post*` points read
-# `<section>.postHook` (see _hook_list_field). This lets a `pre*` and a
-# `post*` hook coexist in the same section without colliding.
+# `preprocessing` and `postprocessing` are standalone top-level sections (NOT
+# nested under a processing step), and each holds a SINGLE FLAT hook rather than
+# a list (see _FLAT_HOOK_POINTS):
 #
-# `preprocessing` is a standalone top-level section (NOT nested under `ocr`):
-# its hook runs FIRST in the workflow, before the BDA/pipeline routing
-# decision, so it fires in both processing modes and even when OCR is
-# disabled. Semantically it operates on the source document, not on OCR
-# output, which is why it gets its own section.
+#   preprocessing  — runs FIRST, before the BDA/pipeline routing decision, so it
+#                    fires in both processing modes and even when OCR is
+#                    disabled. Operates on the source document.
+#   postprocessing — runs LAST, after evaluation and before the workflow's
+#                    terminal state, on the shared tail so it too fires in both
+#                    processing modes. Operates on the finished document, and a
+#                    mutation there reaches the persisted DynamoDB row, the
+#                    reporting/Athena rows, and the UI.
+#
+# Every other point is a POST-STEP point whose hooks live in a
+# `<section>.postHook` LIST.
 _HOOK_TO_STEP = {
     "preprocessing": "preprocessing",
     "postOcr": "ocr",
@@ -159,13 +177,27 @@ _HOOK_TO_STEP = {
     # extraction, so its post-step hook point no longer exists.
     "postRuleValidation": "rule_validation",
     "postSummarization": "summarization",
+    "postprocessing": "postprocessing",
 }
 
+# Points whose config section IS the hook: `arn`/`args`/`onError`/`enabled` live
+# directly on the section, with no list. Membership is explicit rather than
+# derived from the point name — `postprocessing` is flat but starts with "post",
+# so the old `startswith("pre")` heuristic would have looked for a
+# `postprocessing.postHook` list that does not exist.
+_FLAT_HOOK_POINTS = frozenset({"preprocessing", "postprocessing"})
 
-def _hook_list_field(point: str) -> str:
-    """The hook-list field name for a hook point: preHook for pre* points,
-    postHook otherwise. Keeps pre/post hooks in the same section distinct."""
-    return "preHook" if point.startswith("pre") else "postHook"
+# Points where a hook's `halt` request means something. `preprocessing` halts
+# before any processing happens (the PII-redaction "spawned a redacted copy"
+# pattern). At `postprocessing` the document is already finished and there is
+# nothing downstream to skip, so a `halt` there is reported and ignored rather
+# than silently appearing to do something.
+_HALT_CAPABLE_POINTS = frozenset({"preprocessing"})
+
+
+def _is_flat_hook_point(point: str) -> bool:
+    """True when the point's config section is itself a single hook (no list)."""
+    return point in _FLAT_HOOK_POINTS
 
 
 _CONFIG_METADATA_FIELDS = {
@@ -179,6 +211,11 @@ _CONFIG_METADATA_FIELDS = {
     "BdaSyncStatus",
     "BdaLastSyncedAt",
 }
+
+# The version used when no IsActive row can be resolved. It always exists (the
+# host seeds Config#default) but carries no feature hooks, so resolving to it
+# unintentionally is the silent-no-hooks failure mode of issue #599.
+_FALLBACK_VERSION = "default"
 
 _dynamodb = boto3.resource("dynamodb")
 # Hooks run synchronously through this client, so its read timeout must cover
@@ -226,27 +263,47 @@ def _resolve_active_version(table: Any, pinned: Optional[str]) -> Optional[str]:
 
     Order: explicit pin from the document → IsActive=true row → default.
     Returns the version segment ("claims-pack-v0.1.0", "default", …) or
-    None if the table has no Config rows at all.
+    None if the active row's key is malformed.
+
+    The scan MUST paginate. DynamoDB applies both `Limit` and the implicit
+    1MB page size to the items *examined*, not the items that pass
+    `FilterExpression` — so a single scan call returns "no active version"
+    whenever the active row happens to sort beyond the first page, which
+    gets likelier with every config version an admin saves or feature
+    installs. Falling back to `Config#default` then silently disables every
+    registered hook while the workflow still succeeds: the exact
+    growth-triggered failure in issue #599, observed live with the active row
+    at scan position 33 of 35.
     """
     if pinned:
         return pinned
+    scan_kwargs: Dict[str, Any] = {
+        "FilterExpression": "begins_with(Configuration, :p) AND IsActive = :t",
+        "ExpressionAttributeValues": {":p": "Config#", ":t": True},
+        "ProjectionExpression": "Configuration",
+    }
     try:
-        resp = table.scan(
-            FilterExpression="begins_with(Configuration, :p) AND IsActive = :t",
-            ExpressionAttributeValues={
-                ":p": "Config#",
-                ":t": True,
-            },
-            ProjectionExpression="Configuration",
-            Limit=10,
-        )
-        items = resp.get("Items") or []
-        if items:
-            key = items[0]["Configuration"]
-            return key.split("#", 1)[1] if "#" in key else None
+        while True:
+            resp = table.scan(**scan_kwargs)
+            for item in resp.get("Items") or []:
+                key = item["Configuration"]
+                return key.split("#", 1)[1] if "#" in key else None
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
     except Exception as exc:  # noqa: BLE001
         logger.warning("Active-version scan failed: %s", exc)
-    return "default"
+        return _FALLBACK_VERSION
+    # A full scan found no IsActive row. Distinct from the common no-op of
+    # "the active version simply has no hooks for this point", so log it at
+    # WARNING — this is the shape that hid #599 for over an hour.
+    logger.warning(
+        "No active Config# version found after a full scan of the "
+        "ConfigurationTable; falling back to Config#default. Hooks registered "
+        "in a feature's own config version will NOT run."
+    )
+    return _FALLBACK_VERSION
 
 
 def _normalize_hook(h: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -285,8 +342,8 @@ def _read_hooks_from_config(
     normalized entries.
 
     Two shapes:
-      - `preprocessing` (pre* points): a SINGLE inline hook — arn/args/onError/
-        enabled live directly on the `preprocessing` section (not a list).
+      - flat points (`preprocessing`, `postprocessing`): a SINGLE inline hook —
+        arn/args/onError/enabled live directly on the section (not a list).
       - post-step points: a `<section>.postHook` LIST.
     """
     step = _HOOK_TO_STEP.get(point)
@@ -306,13 +363,13 @@ def _read_hooks_from_config(
     if not isinstance(step_block, dict):
         return []
 
-    # Pre* points: the section IS the single hook (flattened arn/args/...).
-    if point.startswith("pre"):
+    # Flat points: the section IS the single hook (flattened arn/args/...).
+    if _is_flat_hook_point(point):
         h = _normalize_hook(step_block)
         return [h] if h else []
 
-    # Post* points: a list under <section>.postHook.
-    raw = step_block.get(_hook_list_field(point)) or []
+    # Post-step points: a list under <section>.postHook.
+    raw = step_block.get("postHook") or []
     if not isinstance(raw, list):
         return []
     valid = [n for n in (_normalize_hook(h) for h in raw) if n]
@@ -617,21 +674,30 @@ def _invoke_hook(hook: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any
         }
 
 
-def _noop(point: Any, document: Any) -> Dict[str, Any]:
+def _noop(point: Any, document: Any, version: Optional[str] = None) -> Dict[str, Any]:
     """An empty dispatch result.
 
     Carries halt=False AND the inbound document unchanged, so both state-machine
     reads — $.HookResults.<point>.Payload.halt (the Choice) and
     ...Payload.document (the Apply Pass state) — resolve unconditionally, even
     when no hook is registered or the point is unknown.
+
+    `version` is echoed as `configVersion` when a version WAS resolved, so the
+    execution history distinguishes "the active version has no hooks here" from
+    "we resolved the wrong version and found none" — `invoked: 0` alone cannot
+    (issue #599). Omitted entirely when resolution never happened (unknown hook
+    point, no configuration table), since there is no version to report.
     """
-    return {
+    out: Dict[str, Any] = {
         "hookPoint": point,
         "invoked": 0,
         "halt": False,
         "document": document,
         "results": [],
     }
+    if version is not None:
+        out["configVersion"] = version
+    return out
 
 
 def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
@@ -655,7 +721,7 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     hooks = _read_hooks_from_config(table, version, point)
     if not hooks:
         logger.info("No hooks registered for %s in Config#%s", point, version)
-        return _noop(point, inbound_document)
+        return _noop(point, inbound_document, version)
 
     # Surface the preprocessing step in the document's visible status (the
     # generic RUNNING otherwise persists for the whole — possibly long —
@@ -735,13 +801,27 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     # do that safely). Any successful hook returning result.halt == true
     # halts the workflow. Used by the preprocessing hook to short-circuit a
     # document whose only purpose was to spawn a redacted copy.
-    halt = any(
+    #
+    # Only honored where the workflow can actually act on it. At
+    # `postprocessing` the document is finished and there is nothing left to
+    # skip, so a `halt` there is reported under `haltIgnored` rather than
+    # returned as a `halt` the state machine would not read anyway — the
+    # difference between "asked and ignored" and "never asked" is worth having
+    # in the execution history.
+    halt_requested = any(
         r.get("ok")
         and isinstance(r.get("result"), dict)
         and r["result"].get("halt") is True
         for r in results
     )
-    return {
+    halt = halt_requested and point in _HALT_CAPABLE_POINTS
+    if halt_requested and not halt:
+        logger.warning(
+            "Hook at %s requested halt, which is not supported at this point "
+            "(the document is already finished); continuing",
+            point,
+        )
+    out: Dict[str, Any] = {
         "hookPoint": point,
         "configVersion": version,
         "invoked": len(results),
@@ -753,3 +833,6 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
         "documentUpdatedBy": updated_by,
         "results": results,
     }
+    if halt_requested and not halt:
+        out["haltIgnored"] = True
+    return out

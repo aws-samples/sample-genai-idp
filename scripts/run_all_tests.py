@@ -59,6 +59,11 @@ RUN_ROOTS = [
     "lib/idp_sdk/tests",
     "lib/idp_feature_sdk/tests",
     "feature-platform/main-stack-extensions/tests",
+    # ConfBench Test Set extension. test_planner.py self-skips unless
+    # huggingface_hub + pyarrow are installed (ingest/planner.py imports both at
+    # module scope); the other three modules run unconditionally. Install
+    # feature-platform/confbench-testset/tests/requirements.txt to run all of it.
+    "feature-platform/confbench-testset/tests",
     "feature-platform/feature-template/feature-api/tests",
     "feature-platform/idp-data-generator/feature-api/tests",
     "feature-platform/pii-anonymizer/feature-api/tests",

@@ -13,7 +13,6 @@ This page contains all demonstration videos for the GenAI Intelligent Document P
 
 - [Overview & Getting Started](#overview--getting-started)
 - [External Presentations & Demos](#external-presentations--demos)
-- [Document Processing Patterns](#document-processing-patterns)
 - [Web User Interface](#web-user-interface)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 - [AI Agents & Analytics](#ai-agents--analytics)
@@ -21,6 +20,7 @@ This page contains all demonstration videos for the GenAI Intelligent Document P
 - [Configuration & Management](#configuration--management)
 - [Evaluation & Testing](#evaluation--testing)
 - [Rule Validation](#rule-validation)
+- [Monitoring & Operations](#monitoring--operations)
 - [Integration & Extensions](#integration--extensions)
 
 ---
@@ -236,6 +236,17 @@ https://github.com/user-attachments/assets/e82c7be0-ee73-4ad7-8537-87ecf6a1a4c8
 
 ---
 
+### Auto Optimizer
+Fully autonomous AI agentic system that optimizes your document processing configuration — no manual prompt engineering required. Give it a labeled dataset (as few as 5 documents) and a cost-per-page budget, and it iteratively refines prompts, model selection, and pipeline configuration, then recommends the best configuration found within budget.
+
+**Duration**: ~3.5 minutes
+
+https://github.com/user-attachments/assets/981ae354-bb5d-4613-bf01-ac17675be25b
+
+**Related Documentation**: [Auto Optimizer Documentation](./extensions/auto-optimizer.md)
+
+---
+
 ### Excluding Static Pages (Instructions, Legal, Boilerplate)
 Mark a document class with `x-aws-idp-exclude-from-processing: true` and the pipeline skips that class's sections through extraction, assessment, summarization, rule validation, and evaluation — zero LLM calls on boilerplate pages. Demo uses a DS-11 U.S. Passport Application (4 static instruction pages + 2 applicant-data pages).
 
@@ -291,6 +302,24 @@ https://github.com/user-attachments/assets/d952fd37-1bd0-437f-8f67-5a634e9422e0
 
 ---
 
+### Confidence Calibration Metrics
+Field-level confidence calibration metrics computed alongside accuracy in Test Studio results — AUROC (does confidence separate correct from incorrect?), ECE (how far off is confidence from actual accuracy?), Brier, and ECARB@30 (what percentage of errors you catch by reviewing the lowest-confidence 30% of data, and the gain vs. random sampling).
+
+https://github.com/user-attachments/assets/1d17ea33-f098-4d9e-a461-1113b9dc3ce9
+
+**Related Documentation**: [Test Studio - Confidence Calibration Metrics](./test-studio.md#confidence-calibration-metrics)
+
+---
+
+### Test Set - ConfBench (Confidence & OCR Robustness)
+Installable Feature Platform extension that deploys the [amazon/ConfBench](https://huggingface.co/datasets/amazon/ConfBench) benchmark into Test Studio on demand — the 75 verified FCC invoices degraded with up to 21 Augraphy noise pipelines into 1,346 (document, noise variant) pairs with identical ground truth. Purpose-built for measuring confidence calibration, OCR robustness, and extraction quality as input quality degrades, with results directly comparable to the clean RealKIE-FCC-Verified baseline.
+
+https://github.com/user-attachments/assets/0b164e6d-c694-4127-8be9-45ec7fd41bee
+
+**Related Documentation**: [Test Set - ConfBench Documentation](./extensions/confbench-testset.md)
+
+---
+
 ### Creating Custom Test Sets with Ground Truth
 End-to-end workflow for creating your own test set from scratch — configure for high accuracy, discover the schema, process and review documents, save ground truth, and compare model accuracy vs. cost.
 
@@ -317,6 +346,26 @@ Automatically validate documents against business rules and compliance requireme
 https://github.com/user-attachments/assets/bac617ec-edb0-4719-827f-175571a4b9f5
 
 **Related Documentation**: [Rule Validation Documentation](./rule-validation.md)
+
+---
+
+## Monitoring & Operations
+
+### Capacity Planning
+Real-time capacity analysis and AWS service quota recommendations — calculate processing capacity before scaling production workloads, identify pipeline bottlenecks, and derive the required Bedrock TPM/RPM quotas for your expected volume.
+
+https://github.com/user-attachments/assets/6e668c2f-c6dc-490e-a4ce-10c533cd330e
+
+**Related Documentation**: [Capacity Planning Documentation](./capacity-planning.md)
+
+---
+
+### Circuit Breaker
+Protects the pipeline from cascading failures when Amazon Bedrock is degraded. When the Bedrock error rate crosses a configurable threshold the breaker opens and new workflows stop starting, so messages stay in SQS instead of burning Lambda concurrency on doomed executions. It probes recovery via a half-open state and resumes normal processing automatically.
+
+https://github.com/user-attachments/assets/86aefe92-d86d-4e38-862d-5e8047a63c80
+
+**Related Documentation**: [Circuit Breaker Documentation](./circuit-breaker.md)
 
 ---
 

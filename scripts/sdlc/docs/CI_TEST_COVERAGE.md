@@ -14,7 +14,7 @@ its `make` target and the skill that documents how to run it.
 
 | Test / suite | Make target | Skill |
 |---|---|---|
-| Primary functional suite (Steps 3–13) | *(runs in CI; deploy a stack then use the individual targets below)* | — |
+| Primary functional suite (Steps 3–14) | *(runs in CI; deploy a stack then use the individual targets below)* | — |
 | API RBAC / authorization (Step 12) | `make api-test STACK_NAME=…` (alias `make stacktest-rbac`) · static-only: `make api-test-static` | `.claude/skills/api-rbac-test.md` |
 | ZAP DAST scan | `make stacktest-zap STACK_NAME=…` | `.claude/skills/run-stack-tests.md` |
 | APIGateway GLOBAL hosting | `make stacktest-hosting-global` | `.claude/skills/run-stack-tests.md` |
@@ -118,9 +118,10 @@ Notes:
 
 ## Test Execution Strategy
 
-### Parallel Execution (Steps 3-11, 13)
-- **10 tests run concurrently** to minimize pipeline runtime (Step 13, the
-  read-only permissions-boundary check, joins the parallel pool)
+### Parallel Execution (Steps 3-11, 13, 14)
+- **11 tests run concurrently** to minimize pipeline runtime (Step 13, the
+  read-only permissions-boundary check, and Step 14, the pipeline-hook test,
+  join the parallel pool)
 - **Fail-fast enabled**: If any test fails, remaining tests are cancelled and cleanup begins
 - **Expected runtime**: ~25-35 minutes (vs 60+ minutes sequential)
 
@@ -373,6 +374,109 @@ should attach that boundary to every `AWS::IAM::Role` it creates.
 
 ---
 
+### Step 14: Pipeline Hooks End-to-End ⚡ *Parallel*
+**What it tests**: the [pipeline-hook](../../../docs/feature-platform.md#pipeline-hooks)
+mechanism — the platform's supported way for a feature or an admin to inject
+business logic into document processing — at both standalone hook points
+(`preprocessing` and `postprocessing`).
+- **Why it exists**: before this step, **none of the seven hook points had any
+  end-to-end coverage.** Unit tests exercise the dispatcher with fakes, but four
+  things only exist on a real stack: the dispatcher reading a hook out of a real
+  config version, `UpdateSchemaConfig` publishing the hook config sections (so
+  the fields an admin edits exist on the deployed stack), a hook Lambda clearing
+  the dispatcher's tag/name IAM condition, and a hook's `updatedDocument`
+  surviving into the **persisted** document. The gap mattered because a hook that
+  silently never fires is indistinguishable from one that ran and did nothing —
+  the workflow still succeeds and the document still reaches `COMPLETED`. That
+  exact failure mode shipped once already (#599).
+- **Verification**:
+  - The hook sections survive the config write/read round-trip (they are dropped
+    if a config-model field is missing — the regression the offline config-model
+    tests guard)
+  - `HookResults.<point>.Payload.invoked >= 1` for **both** points, read from the
+    Step Functions execution history, plus the `configVersion` the dispatcher
+    resolved — the only assertion that distinguishes "ran and decided nothing"
+    from "never invoked"
+  - `documentUpdatedBy` is non-empty, i.e. the hook's `updatedDocument` was
+    **accepted** rather than refused by the dispatcher's guardrails
+  - the hook's marker is present in the **persisted** document (tracking row),
+    proving the mutation survived past the workflow
+
+**Test Document**: `samples/lending_package.pdf`
+**Duration**: ~5-7 minutes
+**Execution**: Runs in the parallel pool. It registers its hook in its **own**
+config version (`test-pipeline-hooks`) and never activates it, so the other steps
+sharing this stack are unaffected.
+**Implementation**: `test_step14_pipeline_hooks` in
+`scripts/sdlc/codebuild_deployment.py`. Deploys a real `idp-citest-hook-*` Lambda
+built from `idp_common.hooks` — the documented helper pair — so the test also
+exercises the contract we publish to feature authors. **Teardown runs in a
+`finally` and is not optional**: a leftover hook ARN pointing at a deleted Lambda
+is the stale-ARN state that fails every subsequent document at a flat hook point.
+
+**Resource naming satisfies two IAM policies at once**, which is why it is not
+simply `GENAIIDP-*`: the CI CodeBuild role scopes `iam:*` to `role/idp-*` and
+`lambda:*` to `function:idp-*` (so a `GENAIIDP-` prefixed role or function is
+AccessDenied — the step's first pipeline failure), while the host dispatcher only
+invokes a hook that is *either* named `GENAIIDP-*` *or* carries the
+`idp:feature-id` tag. The resources are therefore named `idp-*` and the
+dispatcher is satisfied via the **tag** path. That is also the more
+representative test: tagging is how installed Feature Platform features clear the
+check, while the `GENAIIDP-*` name is the admin escape hatch. The step applies
+the tag unconditionally (not just via `create_function`, whose `Tags` are skipped
+on the reuse-an-existing-function path) and verifies it before proceeding.
+
+**Known asymmetry**: at `preprocessing` the document has no sections yet (OCR and
+classification have not run), so that point's marker can only land in the
+document-level backstop field — which `postprocessing`, running later, overwrites.
+The persisted-marker assertion therefore checks the **postprocessing** marker,
+which is correctly the final value; `preprocessing` is proven to have run by its
+own `invoked` count.
+
+#### Validating Step 14 without a pipeline round-trip
+
+A pipeline round-trip is ~70 minutes, so debug the hook **outside** it. Deploy the
+zip the step builds to a throwaway Lambda and invoke it with a synthetic
+dispatcher event pointing at a **real** compressed document from a live stack's
+working bucket:
+
+```python
+# build the exact zip the step would upload
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("cb", "scripts/sdlc/codebuild_deployment.py")
+cb = importlib.util.module_from_spec(spec); spec.loader.exec_module(cb)
+cb._build_hook_zip("/tmp/hook.zip")
+```
+
+Then `aws lambda create-function` it with `MARKER_KEY` + `WORKING_BUCKET`, tagged
+`idp:feature-id=<anything>`, and invoke with:
+
+```json
+{"hookPoint": "postprocessing", "document": {"compressed": true,
+ "s3_uri": "s3://<working-bucket>/compressed_documents/<doc>/<...>_evaluation_state.json",
+ "document_id": "<doc>", "num_pages": 1, "sections": ["1"]},
+ "args": [{"key": "note", "value": "manual"}]}
+```
+
+This is how the missing **PyYAML** dependency was found: the zip imported fine
+locally but died at Lambda cold start with `ModuleNotFoundError: No module named
+'yaml'`, because `load_hook_document -> Document.decompress ->
+idp_common.utils -> idp_common.config.models -> configuration_manager` imports it.
+Iterating this way is ~1 minute per attempt instead of ~70. Remember to delete
+the function and role afterwards.
+
+Two gotchas the same technique surfaced, worth knowing before writing any hook:
+
+- `Document.metadata` is dropped by `to_dict()`, and the tracking row stores only
+  a reduced section view (`Id`/`Class`/`PageIds`/`OutputJSONUri`) — so a mutation
+  written to either is invisible to a persistence assertion. `summary_report_uri`
+  IS persisted (as `SummaryReportUri`).
+- `boto3`/`botocore` must NOT be vendored into a hook zip: the Lambda runtime
+  supplies them, and including them pushed the package from 4.4MB to 62MB, past
+  the 50MB direct-upload limit.
+
+---
+
 ## Additional Deployment Tests: the deployment-variant probe framework
 
 > **⚠️ Default OFF in CI (changed 2026-07).** These probes no longer run
@@ -384,12 +488,12 @@ should attach that boundary to every `AWS::IAM::Role` it creates.
 > change, they now run **manually, one stack at a time**, via
 > `make stacktest-*` (see `.claude/skills/run-stack-tests.md` and
 > `scripts/sdlc/run_stacktest.py`). The CI pipeline runs the **primary shared
-> stack only** (Steps 3–13). Set `IDP_RUN_PROBES=true` to re-enable them in a pipeline
+> stack only** (Steps 3–14). Set `IDP_RUN_PROBES=true` to re-enable them in a pipeline
 > run. When they DO run (manual sweep or opt-in), launches are staggered
 > (`IDP_PROBE_LAUNCH_STAGGER_SECS`, default 120s) and each deploys **without** a
 > permissions boundary (only the primary suite creates + tests one — Step 13).
 
-Separate from the shared-stack suite above (Steps 3–13, which run against ONE
+Separate from the shared-stack suite above (Steps 3–14, which run against ONE
 stack deployed with default hosting — CloudFront), a **deployment-variant probe
 framework** validates alternative deployment permutations, each on its **own
 throwaway IDP stack**. When enabled the probes run **concurrently** with the
@@ -404,7 +508,7 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 
 > **Scope (important):** probes are **deploy + feature-smoke only, NOT full
 > functional coverage.** A variant can deploy clean yet still have a
-> doc-processing regression that only the shared-stack suite (Steps 3–13) would
+> doc-processing regression that only the shared-stack suite (Steps 3–14) would
 > catch. Don't read a green probe as "this variant processes documents
 > correctly" — only as "this variant deploys and its distinguishing feature
 > responds."
@@ -928,6 +1032,12 @@ but revisit:
       `test_*`; leave excluded (not tests).
 
 ### Done (this cycle — no longer gaps)
+
+- [x] **Pipeline hooks end-to-end.** Added as Step 14: deploys a real hook
+      Lambda, registers it at `preprocessing` + `postprocessing` in a dedicated
+      config version, and asserts the dispatcher invoked it AND that its
+      `updatedDocument` reached the persisted document. Previously **no** hook
+      point had live coverage.
 
 - [x] **Dynamic security testing (DAST).** OWASP ZAP scan of the deployed UI API
       added as the `zapdast` deployment-variant probe — authenticated scan seeded

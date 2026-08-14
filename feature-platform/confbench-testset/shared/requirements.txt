@@ -1,0 +1,7 @@
+# Layer dependencies. Installed by shared/Makefile with an explicit
+# `--platform manylinux_2_28_aarch64`, NOT by SAM's PythonPipBuilder — see the
+# comment there for why pyarrow cannot be built the normal way for arm64.
+#
+# Reading the dataset's parquet metadata (PlannerFunction only, but the layer is
+# mounted by every ingest function).
+pyarrow==23.0.1

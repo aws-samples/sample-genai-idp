@@ -63,7 +63,8 @@ itself); larger ones are compressed here, keeping the hook's synchronous
 response well under Lambda's 6 MB limit at any document size.
 
 `**extra` is merged into the response — your own result fields, and/or
-`halt=True` at the `preprocessing` point:
+`halt=True` at the `preprocessing` point (the only point where `halt` is
+actionable):
 
 ```python
 return updated_document_result(document, halt=True, redactedKey=key)
@@ -139,6 +140,14 @@ Where a mutation reaches depends on the point:
 | `postExtraction` | **A single section** (runs inside the Map) | Assessment; only `sections[0]` + `metering` merge into the final document |
 | `postRuleValidation` | Whole document | Summarization, evaluation, final output |
 | `postSummarization` | Whole document | Evaluation and the final workflow output |
+| `postprocessing` | Whole document, fully processed | Nothing downstream — but it IS the workflow output, so it reaches the tracking row, reporting, and the UI |
+
+`postprocessing` runs last (after evaluation) and, like `preprocessing`, is a
+standalone single-hook point. Two caveats there: `halt` is not actionable (the
+dispatcher reports `haltIgnored`), and a mutation cannot set a terminal
+`status` — a successful execution is forced to `COMPLETED`. It also fires while
+a HITL review is pending, so branch on the document's `hitl_status` /
+`hitl_triggered` fields (absent means no HITL) and keep the hook idempotent.
 
 ## See also
 

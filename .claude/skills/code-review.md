@@ -43,6 +43,19 @@ make fastcommit         # fastlint (skip UI) + auto-commit + push
 - [ ] Explicit `ClientError` catches with `exc_info=True`
 - [ ] No hardcoded AWS account IDs or regions
 
+### DynamoDB Access
+- [ ] `make check-filtered-scans` passes — a filtered `Scan` must **paginate**
+      (`LastEvaluatedKey`), because DynamoDB bounds `Limit` and the 1MB page by
+      items **examined**, not items matching `FilterExpression`. An unpaginated
+      one finds a match only when it lands in the examined window, so it breaks
+      *silently* and *later*, as data grows (issue #599). Deliberate bounded
+      samples need an inline `# filtered-scan-ok: <reason>`.
+- [ ] Project only the attributes you need (`ProjectionExpression`) on a scan
+      used to locate a row — without it the page is spent reading whole item
+      bodies, so far fewer rows are examined per call
+- [ ] A boto3 paginator for one service is NOT pagination for another; check
+      that the paginator in view actually wraps *this* call
+
 ### idp_common Library
 - [ ] New modules use lazy loading pattern (register in `__init__.py.__getattr__`)
 - [ ] Modular dependency groups updated if new deps added (`pyproject.toml`)

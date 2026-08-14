@@ -305,10 +305,19 @@ Resources:
                   name beginning with `GENAIIDP-`.
                 order: 1
               onError:
+                # `skip-remaining` is deliberately NOT offered: there is only
+                # ever one preprocessing hook, so "stop the later hooks at this
+                # point" has nothing to act on and behaves exactly like
+                # `continue`. The dispatcher still accepts the value if an older
+                # config stores it (it falls through to the continue path).
                 type: string
-                enum: ["continue", "fail", "skip-remaining"]
+                enum: ["continue", "fail"]
                 default: continue
-                description: Behavior when the hook errors.
+                description: >-
+                  Behavior when the hook errors. `fail` STOPS the execution in a
+                  terminal state and never falls through to processing the
+                  un-preprocessed original — use it whenever the hook must gate
+                  processing (e.g. PII redaction).
                 order: 2
               args:
                 type: array
@@ -337,6 +346,15 @@ Resources:
                 type: string
                 description: Feature/owner that provides this hook (label only).
                 order: 4
+              allowDocumentUpdate:
+                type: boolean
+                description: >-
+                  Allow this hook to return an `updatedDocument` that replaces
+                  the source document for the rest of the pipeline. Turn off to
+                  pin the hook to observe-only (it can still halt, read the
+                  document, and write to S3).
+                default: true
+                order: 5
           ocr:
             order: 3
             type: object
@@ -2208,6 +2226,78 @@ Resources:
                     format: textarea
                     description: Task prompt for LLM evaluation - supports placeholders {DOCUMENT_CLASS}, {ATTRIBUTE_NAME}, {ATTRIBUTE_DESCRIPTION}, {EXPECTED_VALUE} and {ACTUAL_VALUE}
                     order: 8
+          postprocessing:
+            order: 9.5
+            type: object
+            collapsible: true
+            defaultExpanded: false
+            sectionLabel: Postprocessing
+            # Kept to one line, parallel to the Preprocessing section above.
+            # The caveats that used to live here (in-workflow latency, and the
+            # EventBridge PostProcessingLambdaHookFunctionArn alternative for
+            # fire-and-forget delivery) belong in the docs, not a UI section
+            # header: see docs/post-processing-lambda-hook.md, which carries the
+            # full "which mechanism do I want?" comparison.
+            description: >-
+              A single generic postprocessing hook (Lambda ARN + args) that runs
+              LAST, after evaluation, in both processing modes.
+            properties:
+              enabled:
+                type: boolean
+                description: Run the postprocessing hook for this config version.
+                default: false
+                order: 0
+              arn:
+                type: string
+                description: >-
+                  Lambda function ARN to invoke on the finished document. Must
+                  either be tagged `idp:feature-id=<anything>` OR have a function
+                  name beginning with `GENAIIDP-`.
+                order: 1
+              onError:
+                type: string
+                enum: ["continue", "fail"]
+                default: continue
+                description: >-
+                  Behavior when the hook errors. `fail` marks the document FAILED
+                  even though every processing step succeeded — use it only when
+                  the hook genuinely gates delivery.
+                order: 2
+              args:
+                type: array
+                sectionLabel: Hook arguments
+                description: >-
+                  Key/value arguments passed to the hook (as strings). The hook
+                  reads its own configuration from these — keeping the step
+                  generic (e.g. a destination endpoint or delivery mode).
+                listLabel: Arguments
+                itemLabel: Argument
+                order: 3
+                items:
+                  type: object
+                  required:
+                    - key
+                  properties:
+                    key:
+                      type: string
+                      description: Argument name
+                      order: 0
+                    value:
+                      type: string
+                      description: Argument value (string)
+                      order: 1
+              featureId:
+                type: string
+                description: Feature/owner that provides this hook (label only).
+                order: 4
+              allowDocumentUpdate:
+                type: boolean
+                description: >-
+                  Allow this hook to return an `updatedDocument` that replaces
+                  the final document. Turn off to pin the hook to observe-only
+                  (it can still read the document and write to S3).
+                default: true
+                order: 5
           discovery:
             order: 10
             type: object

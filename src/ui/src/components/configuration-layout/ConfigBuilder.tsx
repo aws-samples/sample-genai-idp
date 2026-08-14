@@ -41,6 +41,21 @@ function humanizeKey(key: string): string {
     .join(' ');
 }
 
+// Numeric sort weight for a schema property's `order`.
+//
+// Fractional orders are used deliberately to slot a new section between two
+// existing ones without renumbering every sibling (e.g. `preprocessing: 2.5`
+// before OCR, `postprocessing: 9.5` between Evaluation and Discovery). Those
+// must NOT be truncated to an integer: parseInt('9.5') is 9, which ties with
+// Evaluation and leaves the resulting position down to sort tie-breaking rather
+// than the schema's stated intent. Non-numeric or absent values sort last.
+const ORDER_LAST = 999;
+function getOrderWeight(order: unknown): number {
+  if (order === undefined || order === null) return ORDER_LAST;
+  const parsed = parseFloat(String(order));
+  return Number.isFinite(parsed) ? parsed : ORDER_LAST;
+}
+
 // Concise field label: prefer an explicit schema `title`, else humanize the key.
 // The (potentially long) `description` is shown separately as help text.
 function getFieldLabel(key: string, property: { title?: unknown }): string {
@@ -926,7 +941,7 @@ const ConfigBuilder = ({
       const withOrder = entries.map(([propKey, propSchema]) => ({
         propKey,
         propSchema,
-        order: propSchema.order !== undefined ? parseInt(String(propSchema.order), 10) : 999,
+        order: getOrderWeight(propSchema.order),
       }));
       // Sort by order
       return withOrder.sort((a, b) => a.order - b.order);
@@ -1241,8 +1256,7 @@ const ConfigBuilder = ({
                           .map(([propKey, prop]) => ({
                             propKey,
                             prop,
-                            // Use the specific order if provided, otherwise default to 999
-                            order: prop.order !== undefined ? parseInt(String(prop.order), 10) : 999,
+                            order: getOrderWeight(prop.order),
                           }))
                           .sort((a, b) => a.order - b.order);
 
@@ -1766,8 +1780,7 @@ const ConfigBuilder = ({
     const withOrder = entries.map(([key, prop]) => ({
       key,
       property: prop,
-      // Use the specific order if provided, otherwise default to 999
-      order: prop.order !== undefined ? parseInt(String(prop.order), 10) : 999,
+      order: getOrderWeight(prop.order),
     }));
 
     // Sort by order

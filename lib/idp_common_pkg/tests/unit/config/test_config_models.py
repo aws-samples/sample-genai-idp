@@ -5,6 +5,8 @@
 Tests for configuration Pydantic models.
 """
 
+import logging
+
 import pytest
 
 from idp_common.config.models import (
@@ -401,6 +403,57 @@ class TestPipelineHookPreservation:
         assert cfg.preprocessing.arn is None
         assert cfg.preprocessing.args == []
 
+    def test_postprocessing_flat_hook_survives_round_trip(self):
+        """The flat `postprocessing` section is the mirror of `preprocessing` and
+        needs the same protection: dropped on a round-trip, the final delivery
+        hook would silently stop running after any Save-as-Version /
+        applyFeatureConfigPreset."""
+        cfg_dict = {
+            "postprocessing": {
+                "enabled": True,
+                "featureId": "delivery",
+                "arn": "arn:aws:lambda:us-west-2:111122223333:function:DeliverHook",
+                "onError": "continue",
+                "args": [{"key": "endpoint", "value": "https://sap.example/ingest"}],
+            }
+        }
+        dumped = IDPConfig.model_validate(cfg_dict).model_dump(mode="python")
+        pp = dumped["postprocessing"]
+        assert pp["enabled"] is True
+        assert pp["arn"].endswith(":DeliverHook")
+        assert pp["onError"] == "continue"
+        assert pp["featureId"] == "delivery"
+        assert {
+            "key": "endpoint",
+            "value": "https://sap.example/ingest",
+        } in pp["args"]
+
+    def test_postprocessing_defaults(self):
+        """Inert by default: no ARN, disabled, empty args — the dispatcher finds
+        no hook and the workflow tail is unchanged."""
+        cfg = IDPConfig.model_validate({})
+        assert cfg.postprocessing.enabled is False
+        assert cfg.postprocessing.arn is None
+        assert cfg.postprocessing.args == []
+        assert cfg.postprocessing.allowDocumentUpdate is True
+
+    def test_both_flat_hook_sections_coexist(self):
+        """A config may carry both flat hooks; neither round-trip clobbers the
+        other (they are separate top-level sections)."""
+        cfg = IDPConfig.model_validate(
+            {
+                "preprocessing": {"enabled": True, "arn": "arn:pre", "onError": "fail"},
+                "postprocessing": {"enabled": True, "arn": "arn:post"},
+            }
+        )
+        dumped = cfg.model_dump(mode="python")
+        assert dumped["preprocessing"]["arn"] == "arn:pre"
+        assert dumped["preprocessing"]["onError"] == "fail"
+        assert dumped["postprocessing"]["arn"] == "arn:post"
+        # Default onError differs by intent: preprocessing gates, postprocessing
+        # must not fail an already-processed document by accident.
+        assert dumped["postprocessing"]["onError"] == "continue"
+
     def test_sparse_rule_validation_overlay_keeps_hook_and_merges_defaults(self):
         """The real failure mode: a sparse preset overlay carrying only
         rule_validation.postHook must keep the hook AND inherit classification
@@ -411,3 +464,40 @@ class TestPipelineHookPreservation:
         assert len(cfg.rule_validation.postHook) == 1
         # classification still has its default model (not wiped out).
         assert cfg.classification.model
+
+
+@pytest.mark.unit
+class TestRuleClassesMigrationIsLoud:
+    """Discarding user-supplied rule_classes must be logged (#600).
+
+    `rule_classes` was renamed to `policy_classes` in v0.5.9. When BOTH keys are
+    present the deprecated one is dropped — and because `rule_classes` is a
+    known-deprecated key it does not trip the unknown-field warning either. A
+    notebook user following the old guidance therefore lost their rules with no
+    message anywhere.
+    """
+
+    def test_rename_when_only_legacy_key_present(self):
+        cfg = IDPConfig(
+            **{"rule_classes": [{"x-aws-idp-policy-type": "a", "rule_properties": {}}]}
+        )
+        assert len(cfg.policy_classes) == 1
+        assert cfg.policy_classes[0]["x-aws-idp-policy-type"] == "a"
+
+    def test_discarding_legacy_key_warns(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            cfg = IDPConfig(
+                **{
+                    "policy_classes": [
+                        {"x-aws-idp-policy-type": "kept", "rule_properties": {}}
+                    ],
+                    "rule_classes": [
+                        {"x-aws-idp-policy-type": "dropped", "rule_properties": {}}
+                    ],
+                }
+            )
+
+        # policy_classes still wins — behavior is unchanged, only the silence is.
+        assert [pc["x-aws-idp-policy-type"] for pc in cfg.policy_classes] == ["kept"]
+        assert "DISCARDING 'rule_classes'" in caplog.text
+        assert "policy_classes" in caplog.text

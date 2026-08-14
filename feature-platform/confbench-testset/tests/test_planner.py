@@ -17,6 +17,16 @@ from typing import Any, Dict, List
 
 import pytest
 
+# ingest/planner.py imports huggingface_hub and pyarrow at module scope (the
+# HF_HOME setup has to happen before huggingface_hub loads), so importing it
+# needs both present. They are heavy runtime pins listed in
+# tests/requirements.txt, not general test dependencies, so skip the whole
+# module rather than erroring when running in the shared gate without them.
+pytest.importorskip(
+    "huggingface_hub", reason="planner imports huggingface_hub at module scope"
+)
+pytest.importorskip("pyarrow", reason="planner imports pyarrow at module scope")
+
 
 @pytest.fixture
 def planner(monkeypatch):

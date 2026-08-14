@@ -855,6 +855,51 @@
                     "BackoffRate": 2.5
                 }
             ],
+            "Next": "PostprocessingHook"
+        },
+        "PostprocessingHook": {
+            "Type": "Task",
+            "Comment": "Standalone postprocessing extension point — runs LAST, after evaluation and before the terminal state, on the SHARED tail so it fires in both processing modes (mirroring how PreprocessingHook runs before the routing decision). Dispatches to the single generic hook (arn + args) in the config's postprocessing section. A mutation here is the last word on the document: WorkflowComplete's output is what the workflow tracker loads, so it reaches the persisted tracking row, the reporting/Athena rows, and the UI. NOTE: unlike PreprocessingHook, a dispatcher/hook error is caught to the normal terminal state — by this point every expensive step has succeeded and the output objects are written, so a delivery-integration error must not discard a good document. A hook that needs to gate sets onError:fail, which surfaces here as a failed execution.",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                "Payload": {
+                    "hookPoint": "postprocessing",
+                    "executionArn.$": "$$.Execution.Id",
+                    "document.$": "$.document"
+                }
+            },
+            "ResultPath": "$.HookResults.postprocessing",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2
+                }
+            ],
+            "Catch": [
+                {
+                    "ErrorEquals": [
+                        "States.ALL"
+                    ],
+                    "ResultPath": null,
+                    "Next": "WorkflowComplete"
+                }
+            ],
+            "Next": "ApplyPostprocessingHookDocument"
+        },
+        "ApplyPostprocessingHookDocument": {
+            "Type": "Pass",
+            "Comment": "Rebuild $ as { document: <possibly hook-modified document> }, which becomes the workflow's final output. Parameters + ResultPath $ (rather than InputPath) is deliberate: it both unwraps the dispatcher result AND drops the temporary $.HookResults key, so the final output shape stays byte-identical to before this feature — the workflow tracker and the EventBridge post-processing hook read $.document, and the output is subject to Step Functions' 256KB limit. On a dispatcher/hook error the Catch above keeps ResultPath null and routes past this state, so $ remains the unmodified { document: ... }.",
+            "Parameters": {
+                "document.$": "$.HookResults.postprocessing.Payload.document"
+            },
+            "ResultPath": "$",
             "Next": "WorkflowComplete"
         },
         "WorkflowComplete": {
