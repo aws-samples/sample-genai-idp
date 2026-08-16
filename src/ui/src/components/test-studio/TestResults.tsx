@@ -1351,19 +1351,21 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
               <MetricInfo metric="Avg Weighted Score" />
             </Box>
             <Box fontSize="heading-l">{averageWeightedScore !== null ? averageWeightedScore.toFixed(3) : 'N/A'}</Box>
-            {/* Avg is computed only over scored documents — surface the
-                denominator when some were excluded so a 0.85 over n=5
-                doesn't get misread as "run-level 85%". */}
-            {Number(results.excludedDocumentCount ?? 0) > 0 && (
-              <Box variant="small" color="text-body-secondary">
-                n ={' '}
-                {results.weightedOverallScores
-                  ? Object.keys(parseWeightedOverallScoresFinite(results.weightedOverallScores as string)).length
-                  : 0}{' '}
-                scored, {Number(results.excludedDocumentCount)} excluded
-              </Box>
-            )}
           </Box>
+          {/* Excluded Docs KPI — surfaced only when a run has no-op documents
+              (class has no extractable schema). Hidden on the happy path so
+              the KPI row stays lean for the common case; visible with a
+              count + info icon whenever the excluded set is non-empty so the
+              drop from filesCount is explicit. */}
+          {Number(results.excludedDocumentCount ?? 0) > 0 && (
+            <Box>
+              <Box variant="awsui-key-label">
+                Excluded Docs
+                <MetricInfo metric="Excluded Docs" />
+              </Box>
+              <Box fontSize="heading-l">{Number(results.excludedDocumentCount)}</Box>
+            </Box>
+          )}
           <Box>
             <Box variant="awsui-key-label">Duration</Box>
             <Box fontSize="heading-l">
@@ -1402,30 +1404,25 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                     placeholder="Select chart type"
                   />
                 }
+                description={(() => {
+                  // Chart-header subtitle: "N documents · X scored · Y excluded".
+                  // Total-only ("N documents") when nothing is excluded, so the
+                  // subtitle still gives useful context on the happy path without
+                  // shouting about an exclusion condition that doesn't exist.
+                  const scored = results.weightedOverallScores
+                    ? Object.keys(parseWeightedOverallScoresFinite(results.weightedOverallScores as string)).length
+                    : 0;
+                  const excluded = Number(results.excludedDocumentCount ?? 0);
+                  const total = scored + excluded;
+                  if (total === 0) return undefined;
+                  if (excluded === 0) {
+                    return `${total} document${total === 1 ? '' : 's'}`;
+                  }
+                  return `${total} documents · ${scored} scored · ${excluded} excluded`;
+                })()}
               >
                 Weighted Overall Score Distribution ({String(results.testRunId)})
               </Header>
-            }
-            footer={
-              // Rendered ONLY when the run has documents that were excluded
-              // from scoring (aggregation Lambda sets ``excludedDocumentCount``
-              // for docs whose sections are all no-ops). The footer explains a
-              // *visible* drop in bar count — a hint on every run would be
-              // noise for the 99% case where nothing is excluded.
-              (() => {
-                const excluded = Number(results.excludedDocumentCount ?? 0);
-                if (excluded === 0) return undefined;
-                const scored = results.weightedOverallScores
-                  ? Object.keys(parseWeightedOverallScoresFinite(results.weightedOverallScores as string)).length
-                  : 0;
-                const total = scored + excluded;
-                return (
-                  <Box variant="small" color="text-body-secondary">
-                    <strong>{excluded}</strong> document{excluded === 1 ? '' : 's'} excluded from scoring (no extractable schema for any
-                    section) — showing {scored} of {total}.
-                  </Box>
-                );
-              })()
             }
           >
             {(() => {
