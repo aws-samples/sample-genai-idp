@@ -1351,6 +1351,18 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
               <MetricInfo metric="Avg Weighted Score" />
             </Box>
             <Box fontSize="heading-l">{averageWeightedScore !== null ? averageWeightedScore.toFixed(3) : 'N/A'}</Box>
+            {/* Avg is computed only over scored documents — surface the
+                denominator when some were excluded so a 0.85 over n=5
+                doesn't get misread as "run-level 85%". */}
+            {Number(results.excludedDocumentCount ?? 0) > 0 && (
+              <Box variant="small" color="text-body-secondary">
+                n ={' '}
+                {results.weightedOverallScores
+                  ? Object.keys(parseWeightedOverallScoresFinite(results.weightedOverallScores as string)).length
+                  : 0}{' '}
+                scored, {Number(results.excludedDocumentCount)} excluded
+              </Box>
+            )}
           </Box>
           <Box>
             <Box variant="awsui-key-label">Duration</Box>
@@ -1395,9 +1407,25 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
               </Header>
             }
             footer={
-              <Box variant="small" color="text-body-secondary">
-                Documents whose sections are all no-ops (class has no extractable schema) are excluded from this chart.
-              </Box>
+              // Rendered ONLY when the run has documents that were excluded
+              // from scoring (aggregation Lambda sets ``excludedDocumentCount``
+              // for docs whose sections are all no-ops). The footer explains a
+              // *visible* drop in bar count — a hint on every run would be
+              // noise for the 99% case where nothing is excluded.
+              (() => {
+                const excluded = Number(results.excludedDocumentCount ?? 0);
+                if (excluded === 0) return undefined;
+                const scored = results.weightedOverallScores
+                  ? Object.keys(parseWeightedOverallScoresFinite(results.weightedOverallScores as string)).length
+                  : 0;
+                const total = scored + excluded;
+                return (
+                  <Box variant="small" color="text-body-secondary">
+                    <strong>{excluded}</strong> document{excluded === 1 ? '' : 's'} excluded from scoring (no extractable schema for any
+                    section) — showing {scored} of {total}.
+                  </Box>
+                );
+              })()
             }
           >
             {(() => {
