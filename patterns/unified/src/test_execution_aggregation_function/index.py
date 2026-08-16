@@ -123,9 +123,8 @@ def aggregate_test_run_with_stickler(
             empty["graded_packet_metrics"] = _aggregate_graded_packet_metrics(
                 doc_graded_packet_scores
             )
-        if excluded_doc_keys:
-            empty["excluded_documents"] = excluded_doc_keys
-            empty["excluded_document_count"] = len(excluded_doc_keys)
+        empty["excluded_documents"] = excluded_doc_keys
+        empty["excluded_document_count"] = len(excluded_doc_keys)
         return empty
 
     # Use Stickler's bulk aggregator
@@ -236,9 +235,8 @@ def aggregate_test_run_with_stickler(
         transformed["graded_packet_metrics"] = _aggregate_graded_packet_metrics(
             doc_graded_packet_scores
         )
-        if excluded_doc_keys:
-            transformed["excluded_documents"] = excluded_doc_keys
-            transformed["excluded_document_count"] = len(excluded_doc_keys)
+        transformed["excluded_documents"] = excluded_doc_keys
+        transformed["excluded_document_count"] = len(excluded_doc_keys)
         return transformed
 
     except Exception as e:
@@ -806,7 +804,13 @@ def _rename_brier_score_key(
 
 
 def _empty_metrics() -> Dict[str, Any]:
-    """Return empty metrics structure."""
+    """Return empty metrics structure.
+
+    ``excluded_documents`` / ``excluded_document_count`` are seeded here (same
+    idiom as ``graded_packet_metrics``) so every return path emits the same
+    shape — the UI can distinguish "field absent" from "0 excluded" without a
+    presence check.
+    """
     return {
         "overall_accuracy": None,
         "weighted_overall_scores": {},
@@ -820,6 +824,8 @@ def _empty_metrics() -> Dict[str, Any]:
         },
         "split_classification_metrics": {},
         "graded_packet_metrics": {},
+        "excluded_documents": [],
+        "excluded_document_count": 0,
         "document_count": 0,
         "total_time": 0,
     }

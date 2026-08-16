@@ -43,7 +43,7 @@ import {
   parseFieldMetrics,
   parseConfusionMatrix,
   parseConfidenceMetrics,
-  parseWeightedOverallScores,
+  parseWeightedOverallScoresFinite,
   parseTestRunConfig,
 } from '../../graphql/awsjson-parsers';
 import type { GradedPacketMetrics } from '../../graphql/awsjson-types';
@@ -1034,15 +1034,14 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
 
   const hasAccuracyData = results.overallAccuracy !== null && results.overallAccuracy !== undefined;
 
-  // Calculate average weighted overall score. The aggregation Lambda drops
-  // documents whose sections were all no-ops (no extractable schema) from
-  // ``weightedOverallScores``; a defensive numeric filter also guards against
-  // any stray null/NaN sneaking in from older payloads so the mean isn't
-  // pulled down by a synthetic 0.0.
+  // Calculate average weighted overall score. ``parseWeightedOverallScoresFinite``
+  // drops documents whose weighted score isn't a finite number — the
+  // aggregation Lambda already omits excluded (no-op) docs, but this also
+  // guards against any stray null/NaN in older cached payloads so the mean
+  // isn't pulled down by a synthetic 0.0.
   const averageWeightedScore = (() => {
     if (!results.weightedOverallScores) return null;
-    const scores = parseWeightedOverallScores(results.weightedOverallScores as string);
-    const values = (Object.values(scores) as unknown[]).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    const values = Object.values(parseWeightedOverallScoresFinite(results.weightedOverallScores as string));
     return values.length > 0 ? values.reduce((sum, score) => sum + score, 0) / values.length : null;
   })();
 
@@ -1403,10 +1402,13 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
           >
             {(() => {
               const generateChartData = () => {
+                // ``parseWeightedOverallScoresFinite`` drops excluded / null / NaN
+                // entries — otherwise ``null < 0.1`` in JS silently lands them
+                // in the 0.0-0.1 bucket.
                 const scores =
                   typeof results.weightedOverallScores === 'string'
-                    ? parseWeightedOverallScores(results.weightedOverallScores)
-                    : results.weightedOverallScores;
+                    ? parseWeightedOverallScoresFinite(results.weightedOverallScores)
+                    : parseWeightedOverallScoresFinite(results.weightedOverallScores);
 
                 // Create score range buckets
                 const buckets: Record<string, { count: number; docs: RangeDoc[] }> = {
@@ -1422,29 +1424,22 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
                   '0.9-1.0': { count: 0, docs: [] },
                 };
 
-                // Count documents and collect IDs in each bucket. Filter out
-                // docs whose score isn't a finite number — the aggregator
-                // drops excluded (no-op) docs from ``weightedOverallScores``
-                // upstream, but defending here means a stray null wouldn't
-                // land in the 0.0-0.1 bucket (null < 0.1 is truthy in JS).
-                (Object.entries(scores as Record<string, number>) as [string, number][])
-                  .filter(([, score]) => typeof score === 'number' && Number.isFinite(score))
-                  .forEach(([docId, score]) => {
-                    let bucket;
-                    if (score < 0.1) bucket = '0.0-0.1';
-                    else if (score < 0.2) bucket = '0.1-0.2';
-                    else if (score < 0.3) bucket = '0.2-0.3';
-                    else if (score < 0.4) bucket = '0.3-0.4';
-                    else if (score < 0.5) bucket = '0.4-0.5';
-                    else if (score < 0.6) bucket = '0.5-0.6';
-                    else if (score < 0.7) bucket = '0.6-0.7';
-                    else if (score < 0.8) bucket = '0.7-0.8';
-                    else if (score < 0.9) bucket = '0.8-0.9';
-                    else bucket = '0.9-1.0';
+                Object.entries(scores).forEach(([docId, score]) => {
+                  let bucket;
+                  if (score < 0.1) bucket = '0.0-0.1';
+                  else if (score < 0.2) bucket = '0.1-0.2';
+                  else if (score < 0.3) bucket = '0.2-0.3';
+                  else if (score < 0.4) bucket = '0.3-0.4';
+                  else if (score < 0.5) bucket = '0.4-0.5';
+                  else if (score < 0.6) bucket = '0.5-0.6';
+                  else if (score < 0.7) bucket = '0.6-0.7';
+                  else if (score < 0.8) bucket = '0.7-0.8';
+                  else if (score < 0.9) bucket = '0.8-0.9';
+                  else bucket = '0.9-1.0';
 
-                    buckets[bucket].count++;
-                    buckets[bucket].docs.push({ docId, score });
-                  });
+                  buckets[bucket].count++;
+                  buckets[bucket].docs.push({ docId, score });
+                });
 
                 let maxCount = 0;
                 const mappedData = Object.entries(buckets).map(([range, data]) => {
@@ -1589,17 +1584,15 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             }
           >
             {(() => {
+              // ``parseWeightedOverallScoresFinite`` drops excluded / null / NaN
+              // entries so a stray null can't sort to the front and render
+              // as "null.toFixed(3)".
               const scores =
                 typeof results.weightedOverallScores === 'string'
-                  ? parseWeightedOverallScores(results.weightedOverallScores)
-                  : results.weightedOverallScores;
+                  ? parseWeightedOverallScoresFinite(results.weightedOverallScores)
+                  : parseWeightedOverallScoresFinite(results.weightedOverallScores);
 
-              // Same defensive filter as the histogram: docs excluded from
-              // scoring (no extractable schema) never enter the map upstream,
-              // but a stray null would sort to the front and render as
-              // "null.toFixed(3)" — guard so this table only shows real scores.
-              const sortedDocs = (Object.entries(scores as Record<string, number>) as [string, number][])
-                .filter(([, score]) => typeof score === 'number' && Number.isFinite(score))
+              const sortedDocs = Object.entries(scores)
                 .map(([docId, score]) => ({ docId, score }))
                 .sort((a, b) => a.score - b.score)
                 .slice(0, Number(lowestScoreCount.value));

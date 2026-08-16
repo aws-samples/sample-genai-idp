@@ -230,6 +230,10 @@ class TestAggregation:
         # resolver's DynamoDB write never misses the key (the stale-cache
         # guard in test_results_resolver keys on its presence).
         assert metrics["graded_packet_metrics"] == {}
+        # excluded_documents / excluded_document_count follow the same idiom
+        # so the UI never has to distinguish "field absent" from "0 excluded".
+        assert metrics["excluded_documents"] == []
+        assert metrics["excluded_document_count"] == 0
 
     def test_calculate_false_alarm_rate(self, mock_env):
         """Test false alarm rate calculation.

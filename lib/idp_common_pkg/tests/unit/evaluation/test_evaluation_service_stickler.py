@@ -1579,7 +1579,7 @@ def test_evaluate_section_class_not_in_config_and_no_expected_is_skipped():
 
     assert result.metrics.get("evaluation_skipped") is True
     assert result.metrics.get("weighted_overall_score") is None
-    assert result.metrics.get("skip_reason") == "no_extractable_schema"
+    assert result.metrics.get("exclusion_reason") == "no_extractable_schema"
     # No attributes are surfaced — Stickler was never invoked.
     assert result.attributes == []
 
@@ -1644,7 +1644,7 @@ def test_document_rollup_ignores_skipped_sections_and_weights_only_scored():
         metrics={
             "weighted_overall_score": None,
             "evaluation_skipped": True,
-            "skip_reason": "no_extractable_schema",
+            "exclusion_reason": "no_extractable_schema",
         },
     )
     delivery_result = SectionEvaluationResult(
@@ -1654,7 +1654,7 @@ def test_document_rollup_ignores_skipped_sections_and_weights_only_scored():
         metrics={
             "weighted_overall_score": None,
             "evaluation_skipped": True,
-            "skip_reason": "no_extractable_schema",
+            "exclusion_reason": "no_extractable_schema",
         },
     )
 
@@ -1729,7 +1729,7 @@ def test_document_rollup_all_sections_skipped_yields_none_score():
         metrics={
             "weighted_overall_score": None,
             "evaluation_skipped": True,
-            "skip_reason": "no_extractable_schema",
+            "exclusion_reason": "no_extractable_schema",
         },
     )
     delivery_result = SectionEvaluationResult(
@@ -1739,7 +1739,7 @@ def test_document_rollup_all_sections_skipped_yields_none_score():
         metrics={
             "weighted_overall_score": None,
             "evaluation_skipped": True,
-            "skip_reason": "no_extractable_schema",
+            "exclusion_reason": "no_extractable_schema",
         },
     )
 

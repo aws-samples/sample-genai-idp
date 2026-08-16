@@ -23,7 +23,7 @@ import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as
 import MetricInfo, { ACCURACY_METRIC_MAP, SPLIT_METRIC_MAP } from './utils/MetricInfo';
 import {
   parseComparisonMetrics,
-  parseWeightedOverallScores,
+  parseWeightedOverallScoresFinite,
   parseConfigSettingValues,
   calculateAvgCostPerPage,
   parseConfidenceMetrics,
@@ -423,10 +423,9 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         </>,
         ...Object.values(completeTestRuns).map((run) => {
           if (run.weightedOverallScores) {
-            const scores = parseWeightedOverallScores(run.weightedOverallScores as string);
-            // Filter to finite numbers so excluded docs (no extractable schema)
-            // or any stray null in older payloads don't pull the mean toward 0.
-            const values = (Object.values(scores) as unknown[]).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+            // ``parseWeightedOverallScoresFinite`` drops excluded / null / NaN
+            // entries so they can't pull the mean toward 0.
+            const values = Object.values(parseWeightedOverallScoresFinite(run.weightedOverallScores as string));
             if (values.length > 0) {
               const avg = values.reduce((sum: number, score: number) => sum + score, 0) / values.length;
               return avg.toFixed(3);
@@ -602,13 +601,12 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
       accuracyRows.push(row);
     });
 
-    // Add weighted overall score to accuracy breakdown. Skip null/NaN entries
-    // so excluded documents (no extractable schema) don't drag the mean down.
+    // Add weighted overall score to accuracy breakdown. Excluded docs
+    // (no extractable schema) are dropped by ``parseWeightedOverallScoresFinite``.
     const weightedRow = ['Weighted Overall Score'];
     Object.entries(completeTestRuns).forEach(([_testRunId, testRun]) => {
       if (testRun.weightedOverallScores) {
-        const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
-        const values = (Object.values(scores) as unknown[]).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+        const values = Object.values(parseWeightedOverallScoresFinite(testRun.weightedOverallScores as string));
         if (values.length > 0) {
           const avg = values.reduce((sum: number, score: number) => sum + score, 0) / values.length;
           weightedRow.push(avg.toFixed(3));
@@ -816,8 +814,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             averageConfidence: testRun.averageConfidence,
             averageWeightedOverallScore: (() => {
               if (testRun.weightedOverallScores) {
-                const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
-                const values = (Object.values(scores) as unknown[]).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+                const values = Object.values(parseWeightedOverallScoresFinite(testRun.weightedOverallScores as string));
                 return values.length > 0 ? values.reduce((sum: number, score: number) => sum + score, 0) / values.length : null;
               }
               return null;
@@ -894,11 +891,10 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
       accuracyBreakdown: Object.fromEntries(
         Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
           const breakdown = { ...((testRun.accuracyBreakdown || {}) as Record<string, unknown>) };
-          // Add weighted overall score to accuracy breakdown. Skip null/NaN
-          // so excluded docs (no extractable schema) don't pull the mean.
+          // Add weighted overall score to accuracy breakdown. Excluded docs
+          // are dropped by ``parseWeightedOverallScoresFinite``.
           if (testRun.weightedOverallScores) {
-            const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
-            const values = (Object.values(scores) as unknown[]).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+            const values = Object.values(parseWeightedOverallScoresFinite(testRun.weightedOverallScores as string));
             if (values.length > 0) {
               breakdown.weightedOverallScore = values.reduce((sum: number, score: number) => sum + score, 0) / values.length;
             }
@@ -1125,10 +1121,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                   ...Object.fromEntries(
                     Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                       if (testRun.weightedOverallScores) {
-                        const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
-                        const values = (Object.values(scores) as unknown[]).filter(
-                          (v): v is number => typeof v === 'number' && Number.isFinite(v),
-                        );
+                        const values = Object.values(parseWeightedOverallScoresFinite(testRun.weightedOverallScores as string));
                         if (values.length > 0) {
                           const avg = values.reduce((sum: number, score: number) => sum + score, 0) / values.length;
                           return [testRunId, avg.toFixed(3)];
@@ -1228,18 +1221,15 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             const testRunIds = Object.keys(completeTestRuns);
 
             // Get lowest scoring documents from each test run. Excluded docs
-            // (no extractable schema) are dropped from ``weightedOverallScores``
-            // upstream; the filter below is a safety net for any stray null
-            // in older payloads so they don't rank first.
+            // (no extractable schema) are dropped by
+            // ``parseWeightedOverallScoresFinite`` so they can't rank first as
+            // "null.toFixed(3)".
             const getLowestDocs = (testRun: Record<string, unknown>) => {
               if (!testRun?.weightedOverallScores) return [];
 
-              const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
-
-              return (Object.entries(scores) as [string, number][])
-                .filter(([, score]) => typeof score === 'number' && Number.isFinite(score))
+              return Object.entries(parseWeightedOverallScoresFinite(testRun.weightedOverallScores as string))
                 .map(([docId, score]) => ({ docId, score }))
-                .sort((a, b) => Number(a.score) - Number(b.score))
+                .sort((a, b) => a.score - b.score)
                 .slice(0, Number(lowestScoreCount.value));
             };
 
@@ -1417,10 +1407,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                 ...Object.fromEntries(
                   Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
                     if (testRun.weightedOverallScores) {
-                      const scores = parseWeightedOverallScores(testRun.weightedOverallScores as string);
-                      const values = (Object.values(scores) as unknown[]).filter(
-                        (v): v is number => typeof v === 'number' && Number.isFinite(v),
-                      );
+                      const values = Object.values(parseWeightedOverallScoresFinite(testRun.weightedOverallScores as string));
                       if (values.length > 0) {
                         const avg = values.reduce((sum, score) => sum + score, 0) / values.length;
                         return [testRunId, avg.toFixed(3)];

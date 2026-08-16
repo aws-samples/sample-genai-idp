@@ -414,10 +414,11 @@ class DocumentEvaluationResult:
 
         # Add weighted overall score if available. When every section was a
         # scoring no-op (no extractable schema), the weighted score is None —
-        # render as "N/A — Excluded" instead of a misleading 0.0000.
+        # render as "N/A — Excluded" instead of a misleading 0.0000. The
+        # ``None`` sentinel is authoritative: service.py sets
+        # ``evaluation_excluded`` iff the score is None.
         weighted_score = self.overall_metrics.get("weighted_overall_score")
-        evaluation_excluded = bool(self.overall_metrics.get("evaluation_excluded"))
-        if weighted_score is None or evaluation_excluded:
+        if weighted_score is None:
             sections.append(
                 "- **Weighted Overall Score**: ⚪ N/A — Excluded "
                 "(no extractable schema for any section)"
@@ -446,10 +447,12 @@ class DocumentEvaluationResult:
             sections.append("## Excluded Sections (Not Evaluated)")
             sections.append("")
             sections.append(
-                "The following sections were classified as an "
-                "`x-aws-idp-exclude-from-processing` class and were therefore "
-                "skipped during extraction/assessment/evaluation. They do "
-                "**not** contribute to the accuracy metrics above."
+                "The following sections were skipped during evaluation and do "
+                "**not** contribute to the accuracy metrics above. Sections are "
+                "excluded either because their class was marked "
+                "`x-aws-idp-exclude-from-processing: true` (whole-pipeline skip) "
+                "or because the class has no extractable attributes defined in "
+                "the evaluation schema (evaluation-only skip)."
             )
             sections.append("")
             sections.append("| Section | Classification | Exclusion Reason | Pages |")

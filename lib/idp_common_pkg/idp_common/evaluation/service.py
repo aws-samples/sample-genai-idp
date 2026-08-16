@@ -604,15 +604,16 @@ class EvaluationService:
     def _build_excluded_section_result(
         section: Section,
         document_class: str,
-        skip_reason: str,
+        exclusion_reason: str,
         message: str,
     ) -> SectionEvaluationResult:
         """Build a stub ``SectionEvaluationResult`` for an excluded section.
 
         The stub carries ``evaluation_skipped=True`` and ``weighted_overall_score=None``
         in ``metrics`` so downstream aggregation can distinguish "no fields to
-        score" from a legitimate zero. Kept static so it's cheap to reuse in
-        tests without instantiating an ``EvaluationService``.
+        score" from a legitimate zero. Field names (``exclusion_reason`` /
+        ``message``) mirror the vocabulary used by ``section_exclusion.py`` so
+        the two exclusion paths share one namespace.
         """
         return SectionEvaluationResult(
             section_id=section.section_id,
@@ -621,8 +622,8 @@ class EvaluationService:
             metrics={
                 "weighted_overall_score": None,
                 "evaluation_skipped": True,
-                "skip_reason": skip_reason,
-                "skip_message": message,
+                "exclusion_reason": exclusion_reason,
+                "message": message,
             },
         )
 
@@ -1311,7 +1312,7 @@ class EvaluationService:
             return self._build_excluded_section_result(
                 section=section,
                 document_class=class_name,
-                skip_reason="no_extractable_schema",
+                exclusion_reason="no_extractable_schema",
                 message=(
                     f"Class '{class_name}' has no attributes defined in the "
                     f"evaluation schema; section excluded from scoring."
@@ -1855,6 +1856,12 @@ class EvaluationService:
             total_field_weight = 0.0
             unweighted_score_sum = 0.0
             unweighted_score_count = 0
+            skipped_section_count = 0
+
+            # Map section_id → actual Section so the skipped-section branch
+            # can pull ``page_ids`` / ``classification`` for the excluded-
+            # sections table without re-scanning the document.
+            actual_sections_by_id = {s.section_id: s for s, _ in section_pairs}
 
             # Process sections in parallel using ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -1883,9 +1890,32 @@ class EvaluationService:
                         # No-op sections (no extractable schema for the class)
                         # contribute nothing to the document score — Stickler
                         # was never run and their weighted score is intentionally
-                        # None. Skip the whole aggregation branch so a spurious
-                        # 0.0 doesn't leak into the weighted mean.
+                        # None. Skip the aggregation branch so a spurious 0.0
+                        # doesn't leak in, and record the section in
+                        # ``excluded_sections_info`` so the markdown report's
+                        # "Excluded Sections (Not Evaluated)" table renders it
+                        # alongside the x-aws-idp-exclude-from-processing path.
                         if result.metrics.get("evaluation_skipped"):
+                            skipped_section_count += 1
+                            skipped_section = actual_sections_by_id.get(section_id)
+                            excluded_sections_info.append(
+                                {
+                                    "section_id": section_id,
+                                    "classification": (
+                                        skipped_section.classification
+                                        if skipped_section
+                                        else result.document_class
+                                    ),
+                                    "exclusion_reason": result.metrics.get(
+                                        "exclusion_reason", "no_extractable_schema"
+                                    ),
+                                    "page_ids": (
+                                        list(skipped_section.page_ids or [])
+                                        if skipped_section
+                                        else []
+                                    ),
+                                }
+                            )
                             continue
 
                         # Update overall metrics
@@ -1964,12 +1994,12 @@ class EvaluationService:
             # Documents whose every section was excluded from scoring (no
             # extractable schema) get ``None`` so downstream UI / rollups can
             # render them as "N/A — Excluded" instead of a misleading 0.0.
-            skipped_section_count = sum(
-                1 for r in section_results if r.metrics.get("evaluation_skipped")
+            # ``skipped_section_count`` was maintained in the executor loop; no
+            # second pass over section_results.
+            all_sections_skipped = (
+                skipped_section_count > 0
+                and skipped_section_count == len(section_results)
             )
-            all_sections_skipped = bool(
-                section_results
-            ) and skipped_section_count == len(section_results)
             if total_field_weight > 0:
                 document_weighted_score = total_weighted_score / total_field_weight
             elif unweighted_score_count > 0:
