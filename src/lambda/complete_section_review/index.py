@@ -98,13 +98,20 @@ def _assert_annotator_scope(event, object_key):
     """Verify a scoped Annotator may touch this document's test set.
 
     A review document carries its originating ``TestSetId``, which is checked
-    against the caller's allowedTestSets. Admin/Reviewer are unaffected; a
-    document with no test set is production HITL work and is refused.
+    against the caller's allowedTestSets. A document with no test set is production
+    HITL work and is refused.
+
+    Only Admin and Author are exempt — the same set ``testset_scope`` treats as
+    unscoped. Exempting Reviewer as well turned object scope *off* for anyone holding
+    both groups instead of intersecting the two, so the two enforcement layers
+    disagreed: the library refuses such a caller, this Lambda waved them through.
+    Since annotators are assigned by hand in Cognito (there is no external-IdP
+    mapping for the role), holding both is an easy mistake to make.
     """
     groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
     if isinstance(groups, str):
         groups = [groups]
-    if "Annotator" not in groups or {"Admin", "Reviewer"}.intersection(groups):
+    if "Annotator" not in groups or {"Admin", "Author"}.intersection(groups):
         return
 
     from idp_common.testset_scope import (

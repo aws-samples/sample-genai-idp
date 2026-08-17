@@ -22,7 +22,6 @@ from idp_common.testset_scope import (
     TestSetAccessDenied,
     assert_can_access_test_set,
     get_allowed_test_sets,
-    visible_test_sets,
 )
 
 pytestmark = pytest.mark.unit
@@ -225,39 +224,6 @@ class TestScopeLookup:
 
     def test_missing_email_returns_no_scope(self, users_table):
         assert get_allowed_test_sets("", users_table) is None
-
-
-class TestVisibleTestSets:
-    def test_annotator_sees_only_assigned_sets(self, users_table):
-        """List operations filter rather than 403 — an annotator should see theirs."""
-        _seed_user(users_table, "ann@example.com", allowed=["ts-a"])
-        visible = visible_test_sets(
-            _event(["Annotator"], "ann@example.com"),
-            ["ts-a", "ts-b", "ts-c"],
-            users_table,
-        )
-        assert visible == ["ts-a"]
-
-    def test_admin_sees_everything(self, users_table):
-        candidates = ["ts-a", "ts-b"]
-        assert (
-            visible_test_sets(_event(["Admin"]), candidates, users_table) == candidates
-        )
-
-    def test_other_roles_see_nothing(self, users_table):
-        assert visible_test_sets(_event(["Viewer"]), ["ts-a"], users_table) == []
-
-    def test_unscoped_annotator_sees_nothing(self, users_table):
-        _seed_user(users_table, "ann@example.com", allowed=None)
-        assert (
-            visible_test_sets(
-                _event(["Annotator"], "ann@example.com"), ["ts-a"], users_table
-            )
-            == []
-        )
-
-    def test_direct_invoke_sees_everything(self, users_table):
-        assert visible_test_sets({}, ["ts-a", "ts-b"], users_table) == ["ts-a", "ts-b"]
 
 
 @pytest.mark.unit

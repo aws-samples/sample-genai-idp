@@ -801,6 +801,10 @@ type DraftLabelJob @aws_cognito_user_pools @aws_iam {
   # generated, or reviewed). Surfaced so "40 of 100" reads as deliberate rather
   # than a stalled job.
   skippedAlreadyLabeled: Int
+  # Documents whose processing ended in a terminal failure. The job completes
+  # without them rather than waiting forever, so the count is what explains the
+  # remaining gap between labeled and total.
+  failedDocuments: Int
 }
 
 # One point on the error-burndown curve: residual error after reviewing N of the
@@ -1438,6 +1442,13 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
 }
 
+# Documents are partitioned by who submitted them; the views are mutually
+# exclusive by design and there is no combined view.
+enum DocumentView {
+  PRODUCTION
+  TEST
+}
+
 type DocumentPage @aws_cognito_user_pools @aws_iam {
   Documents: [Document]
   nextToken: String
@@ -1460,17 +1471,18 @@ type Query @aws_cognito_user_pools @aws_iam {
     endDateTime: AWSDateTime
     limit: Int
     nextToken: String
-    # Which submissions to list: "production" (default) for ordinary uploads, or
-    # "test" for documents submitted by Test Studio / Auto Optimizer. These run
-    # through the same pipeline, so without this they are indistinguishable in
-    # this list — on a dev stack 248 of 249 rows were test artifacts.
-    submissionSource: String
+    # Which submissions to list. Test Studio / Auto Optimizer documents run through
+    # the same pipeline as uploads, so without this they are indistinguishable in
+    # this list — on a dev stack 248 of 249 rows were test artifacts. An enum, not a
+    # free string, because the two views are separate index partitions rather than a
+    # filter: an unrecognised value would otherwise silently return PRODUCTION.
+    view: DocumentView = PRODUCTION
   ): DocumentPage
   getDocumentCount(
     startDateTime: AWSDateTime
     endDateTime: AWSDateTime
     # Must match the listDocuments view or the header count contradicts the rows.
-    submissionSource: String
+    view: DocumentView = PRODUCTION
   ): DocumentCount
   listDocumentsDateHour(date: AWSDate, hour: Int): DocumentList
   listDocumentsDateShard(date: AWSDate, shard: Int): DocumentList

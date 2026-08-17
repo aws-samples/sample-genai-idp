@@ -5,6 +5,10 @@
       "MULTI_CLASS",
       "PACKET_SPLITTING"
     ],
+    "DocumentView": [
+      "PRODUCTION",
+      "TEST"
+    ],
     "FeatureEntitlementState": [
       "NONE",
       "ACTIVE",
@@ -660,9 +664,9 @@
         {
           "elem_non_null": false,
           "is_list": false,
-          "name": "submissionSource",
+          "name": "view",
           "non_null": false,
-          "type": "String"
+          "type": "DocumentView"
         }
       ]
     },
@@ -1029,9 +1033,9 @@
         {
           "elem_non_null": false,
           "is_list": false,
-          "name": "submissionSource",
+          "name": "view",
           "non_null": false,
-          "type": "String"
+          "type": "DocumentView"
         }
       ]
     },

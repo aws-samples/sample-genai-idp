@@ -37,6 +37,14 @@ def _load_list_documents_resolver():
     return module
 
 
+class _FakeContext:
+    """Minimal Lambda context; the trigger only needs the remaining-time budget."""
+
+    @staticmethod
+    def get_remaining_time_in_millis():
+        return 900_000
+
+
 def _load_backfill_worker():
     path = os.path.join(
         os.path.dirname(__file__),
@@ -147,17 +155,25 @@ class TestListDocumentsView:
     def test_default_view_is_production(self):
         module = _load_list_documents_resolver()
         assert module._item_type_for_view(None) == "document"
-        assert module._item_type_for_view("production") == "document"
+        assert module._item_type_for_view("PRODUCTION") == "document"
 
     def test_test_view_selects_the_test_item_type(self):
         module = _load_list_documents_resolver()
-        assert module._item_type_for_view("test") == "test-document"
         assert module._item_type_for_view("TEST") == "test-document"
+        # Case-insensitive, so a lower-cased enum value off the wire still works.
+        assert module._item_type_for_view("test") == "test-document"
 
-    def test_unknown_mode_falls_back_to_production(self):
-        """An unrecognised value must not silently show test data."""
+    def test_unknown_value_falls_back_to_production(self):
+        """Defence in depth: GraphQL enum validation rejects these first.
+
+        The argument used to be a free-form String named after the SubmissionSource
+        attribute, so passing the *attribute's* value ("test-studio") silently
+        returned production rows. It is now a DocumentView enum, which the API
+        rejects before the resolver runs.
+        """
         module = _load_list_documents_resolver()
         assert module._item_type_for_view("nonsense") == "document"
+        assert module._item_type_for_view("test-studio") == "document"
 
 
 class TestBackfillRetypesLegacyTestDocuments:
@@ -220,6 +236,108 @@ class TestBackfillRetypesLegacyTestDocuments:
             item, "doc#my-set-20260806-120000/a.pdf", lambda run_id: True
         )
         assert "ItemType" not in updates
+
+    def test_a_changed_version_starts_the_backfill_even_when_the_sample_looks_done(
+        self,
+    ):
+        """The retype pass must reach the stacks that already ran a backfill.
+
+        A one-item sample can only see a *missing* attribute, never a wrong value —
+        and a legacy test-run row already carries ItemType="document". Those rows
+        live on exactly the stacks an earlier backfill has visited, so gating on the
+        sample skipped the upgrade that needed it.
+        """
+        module = _load_backfill_worker()
+        started, responses = self._invoke_trigger(
+            module,
+            request_type="Update",
+            properties={"BackfillVersion": "4.0"},
+            old_properties={"BackfillVersion": "3.0"},
+            sample={
+                "PK": "doc#a.pdf",
+                "ItemType": "document",
+                "ConfidenceAlertCount": 0,
+            },
+        )
+        assert started, "state machine was not started"
+        assert responses[0]["Status"] == "SUCCESS"
+
+    def test_an_unchanged_version_still_short_circuits(self):
+        """A no-op stack update must not rescan the whole table."""
+        module = _load_backfill_worker()
+        started, responses = self._invoke_trigger(
+            module,
+            request_type="Update",
+            properties={"BackfillVersion": "4.0"},
+            old_properties={"BackfillVersion": "4.0"},
+            sample={
+                "PK": "doc#a.pdf",
+                "ItemType": "document",
+                "ConfidenceAlertCount": 0,
+            },
+        )
+        assert not started
+        assert responses[0]["Data"]["BackfillStatus"] == "ALREADY_DONE"
+
+    def test_an_empty_table_never_starts_the_backfill(self):
+        """A brand-new stack has nothing to backfill, whatever the version says."""
+        module = _load_backfill_worker()
+        started, responses = self._invoke_trigger(
+            module,
+            request_type="Create",
+            properties={"BackfillVersion": "4.0"},
+            old_properties=None,
+            sample=None,
+        )
+        assert not started
+        assert responses[0]["Data"]["BackfillStatus"] == "SKIPPED"
+
+    @staticmethod
+    def _invoke_trigger(module, request_type, properties, old_properties, sample):
+        """Run the custom-resource handler, capturing start_execution + response."""
+        props = {
+            "TrackingTableName": "t",
+            "BackfillStateMachineArn": "arn:aws:states:::sm",
+            "TotalSegments": "2",
+            **properties,
+        }
+        event = {"RequestType": request_type, "ResourceProperties": props}
+        if old_properties is not None:
+            event["OldResourceProperties"] = {**props, **old_properties}
+
+        started = []
+        responses = []
+
+        class FakeTable:
+            def scan(self, **kwargs):
+                return {"Items": [sample] if sample else []}
+
+        class FakeResource:
+            def Table(self, _name):
+                return FakeTable()
+
+        class FakeSfn:
+            def start_execution(self, **kwargs):
+                started.append(kwargs)
+                return {"executionArn": "arn:aws:states:::exec"}
+
+        def fake_client(name, *a, **k):
+            assert name == "stepfunctions"
+            return FakeSfn()
+
+        with (
+            patch.object(module.boto3, "resource", lambda *a, **k: FakeResource()),
+            patch.object(module.boto3, "client", fake_client),
+            patch.object(
+                module,
+                "_send_cfn_response",
+                lambda e, c, status, data=None, reason=None: responses.append(
+                    {"Status": status, "Data": data or {}, "Reason": reason}
+                ),
+            ),
+        ):
+            module.handler(event, _FakeContext())
+        return started, responses
 
     def test_the_run_verifier_reads_each_run_once(self):
         """One run covers many documents; the check must not be per item."""

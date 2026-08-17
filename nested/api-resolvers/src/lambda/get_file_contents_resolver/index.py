@@ -168,10 +168,34 @@ def _parse_and_validate_uri(event):
 _INLINE_RENDERABLE_TYPES = ("application/pdf",)
 _INLINE_RENDERABLE_PREFIXES = ("image/", "text/")
 
+# Types a browser renders by EXECUTING them. Served inline from the bucket origin,
+# an uploaded evil.html or evil.svg would run script there instead of downloading —
+# so these are forced to download even though their prefixes are renderable. The
+# bucket is a separate origin from the app and an authenticated uploader is
+# required, which is why this is defence in depth rather than a live hole.
+_NEVER_INLINE_TYPES = frozenset(
+    {
+        "text/html",
+        "text/xml",
+        "application/xhtml+xml",
+        "image/svg+xml",
+        "text/javascript",
+    }
+)
+
+
+def _is_executable_type(content_type):
+    """True when a browser would run script while rendering this type."""
+    if not content_type:
+        return False
+    return content_type.split(";")[0].strip().lower() in _NEVER_INLINE_TYPES
+
 
 def _is_inline_renderable(content_type):
-    """True when a browser can display this type in-page."""
+    """True when a browser can display this type in-page without executing it."""
     if not content_type:
+        return False
+    if _is_executable_type(content_type):
         return False
     lowered = content_type.split(";")[0].strip().lower()
     return lowered in _INLINE_RENDERABLE_TYPES or lowered.startswith(
@@ -212,6 +236,11 @@ def _handle_presigned_url(event):
     presign_params["ResponseContentType"] = content_type
     if _is_inline_renderable(content_type):
         presign_params["ResponseContentDisposition"] = "inline"
+    elif _is_executable_type(content_type):
+        # Must be explicit: with no disposition the browser decides from the
+        # Content-Type alone, so text/html would still render — merely declining to
+        # say "inline" is not the same as saying "attachment".
+        presign_params["ResponseContentDisposition"] = "attachment"
 
     presigned_url = s3_client.generate_presigned_url(
         "get_object",

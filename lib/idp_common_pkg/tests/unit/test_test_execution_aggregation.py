@@ -1009,3 +1009,236 @@ class TestBrierScoreKeyRename:
         }
         out = index._rename_brier_score_key(cm)
         assert out["overall"]["brier"] == {"value": 0.5}
+
+
+class TestConfidenceCurveRecording:
+    """`_record_confidence_curve` folds a scoring run into the review estimator.
+
+    A scoring run is the only source that measures the high-confidence range human
+    review never opens, so it is what lets an estimate call itself "measured" — and
+    what makes it dangerous when the run is not independent of the labels.
+    """
+
+    BINS = [{"bin_start": 0.9, "bin_end": 1.0, "count": 10, "accuracy": 0.99}]
+
+    def _run(self, index, items, result=None, jobs=None):
+        """Invoke the recorder against a fake table; return the CurveStore calls.
+
+        ``jobs`` are the set's labeljob# items, which is how the guard discovers
+        every config that drafted labels rather than only the newest.
+        """
+        recorded = []
+
+        class FakeTable:
+            def get_item(self, Key):  # noqa: N803 — boto3 kwarg name
+                item = items.get((Key["PK"], Key["SK"]))
+                return {"Item": item} if item else {}
+
+            def query(self, **kwargs):
+                return {"Items": list(jobs or [])}
+
+        class FakeStore:
+            def __init__(self, _table):
+                pass
+
+            def add_ece_bins(self, test_set_id, bins, config_version=None):
+                recorded.append((test_set_id, bins, config_version))
+                return len(bins)
+
+        payload = (
+            result
+            if result is not None
+            else {"confidence_metrics": {"overall": {"ece": {"bins": self.BINS}}}}
+        )
+        with (
+            patch.object(index.dynamodb, "Table", lambda _n: FakeTable()),
+            patch("idp_common.evaluation.curve_store.CurveStore", FakeStore),
+        ):
+            index._record_confidence_curve("run-2", "tracking", payload)
+        return recorded
+
+    def test_records_a_run_scored_against_reviewed_labels(self, mock_env):
+        index = import_test_module()
+        recorded = self._run(
+            index,
+            {
+                ("testrun#run-2", "metadata"): {
+                    "TestSetId": "ts1",
+                    "ConfigVersion": "v2",
+                },
+                ("testset#ts1", "metadata"): {
+                    "labelState": "labeled",
+                    "labelJobId": "run-1",
+                },
+                ("testrun#run-1", "metadata"): {"ConfigVersion": "v1"},
+            },
+            jobs=[{"jobId": "run-1"}],
+        )
+        assert recorded == [("ts1", self.BINS, "v2")]
+
+    def test_refuses_a_run_scored_against_labels_its_own_config_drafted(self, mock_env):
+        """The self-comparison case: extraction reproduces its own draft.
+
+        Folding this in reports near-perfect accuracy for labels nobody checked —
+        "99% accuracy, measured on this test set" — which is the false confidence
+        the quality tiers exist to prevent.
+        """
+        index = import_test_module()
+        recorded = self._run(
+            index,
+            {
+                ("testrun#run-2", "metadata"): {
+                    "TestSetId": "ts1",
+                    "ConfigVersion": "v1",
+                },
+                ("testset#ts1", "metadata"): {
+                    "labelState": "draft",
+                    "labelJobId": "run-1",
+                },
+                ("testrun#run-1", "metadata"): {"ConfigVersion": "v1"},
+            },
+            jobs=[{"jobId": "run-1"}],
+        )
+        assert recorded == []
+
+    def test_records_a_different_config_against_the_same_drafts(self, mock_env):
+        """Scoring config B against config A's drafts is a real measurement."""
+        index = import_test_module()
+        recorded = self._run(
+            index,
+            {
+                ("testrun#run-2", "metadata"): {
+                    "TestSetId": "ts1",
+                    "ConfigVersion": "v2",
+                },
+                ("testset#ts1", "metadata"): {
+                    "labelState": "draft",
+                    "labelJobId": "run-1",
+                },
+                ("testrun#run-1", "metadata"): {"ConfigVersion": "v1"},
+            },
+            jobs=[{"jobId": "run-1"}],
+        )
+        assert recorded == [("ts1", self.BINS, "v2")]
+
+    def test_records_once_labels_have_been_reviewed(self, mock_env):
+        """Same config, but a human has confirmed the labels — no longer circular."""
+        index = import_test_module()
+        recorded = self._run(
+            index,
+            {
+                ("testrun#run-2", "metadata"): {
+                    "TestSetId": "ts1",
+                    "ConfigVersion": "v1",
+                },
+                ("testset#ts1", "metadata"): {
+                    "labelState": "labeled",
+                    "labelJobId": "run-1",
+                },
+                ("testrun#run-1", "metadata"): {"ConfigVersion": "v1"},
+            },
+            jobs=[{"jobId": "run-1"}],
+        )
+        assert recorded == [("ts1", self.BINS, "v1")]
+
+    def test_a_non_test_set_run_records_nothing(self, mock_env):
+        index = import_test_module()
+        assert self._run(index, {("testrun#run-2", "metadata"): {}}) == []
+
+    def test_no_ece_bins_records_nothing(self, mock_env):
+        index = import_test_module()
+        assert self._run(index, {}, result={"confidence_metrics": {}}) == []
+
+    def test_a_store_failure_never_fails_aggregation(self, mock_env):
+        """The curve serves a different feature; the dashboard must still update."""
+        index = import_test_module()
+
+        class Boom:
+            def __init__(self, _t):
+                pass
+
+            def add_ece_bins(self, *a, **k):
+                raise RuntimeError("dynamo down")
+
+        class FakeTable:
+            def get_item(self, Key):  # noqa: N803
+                return {"Item": {"TestSetId": "ts1", "ConfigVersion": "v2"}}
+
+        with (
+            patch.object(index.dynamodb, "Table", lambda _n: FakeTable()),
+            patch("idp_common.evaluation.curve_store.CurveStore", Boom),
+        ):
+            index._record_confidence_curve(
+                "run-2",
+                "tracking",
+                {"confidence_metrics": {"overall": {"ece": {"bins": self.BINS}}}},
+            )
+
+    def test_a_reextract_under_another_config_does_not_un_gate_the_guard(
+        self, mock_env
+    ):
+        """The set's pointer names the newest job, which may be a one-doc re-extract.
+
+        Config v1 drafted the whole set; one document was later re-extracted under
+        v2, moving the pointer. Scoring v1 is still measuring v1 against its own
+        output for every other document, so it must stay refused.
+        """
+        index = import_test_module()
+        recorded = self._run(
+            index,
+            {
+                ("testrun#run-2", "metadata"): {
+                    "TestSetId": "ts1",
+                    "ConfigVersion": "v1",
+                },
+                ("testset#ts1", "metadata"): {
+                    "labelState": "draft",
+                    "labelJobId": "run-reextract",
+                },
+                ("testrun#run-1", "metadata"): {"ConfigVersion": "v1"},
+                ("testrun#run-reextract", "metadata"): {"ConfigVersion": "v2"},
+            },
+            jobs=[{"jobId": "run-1"}, {"jobId": "run-reextract"}],
+        )
+        assert recorded == [], "v1 was folded in against labels v1 drafted"
+
+    def test_an_unreadable_job_list_fails_open(self, mock_env):
+        """A transient read error must not silently stop the estimator measuring.
+
+        Missing a refusal is recoverable (reset the curve); dropping every
+        observation is a feature that never leaves "prior".
+        """
+        index = import_test_module()
+        recorded = []
+
+        class FakeTable:
+            def get_item(self, Key):  # noqa: N803
+                return {
+                    "Item": {
+                        "TestSetId": "ts1",
+                        "ConfigVersion": "v1",
+                        "labelState": "draft",
+                    }
+                }
+
+            def query(self, **kwargs):
+                raise RuntimeError("dynamo down")
+
+        class FakeStore:
+            def __init__(self, _t):
+                pass
+
+            def add_ece_bins(self, test_set_id, bins, config_version=None):
+                recorded.append((test_set_id, config_version))
+                return len(bins)
+
+        with (
+            patch.object(index.dynamodb, "Table", lambda _n: FakeTable()),
+            patch("idp_common.evaluation.curve_store.CurveStore", FakeStore),
+        ):
+            index._record_confidence_curve(
+                "run-2",
+                "tracking",
+                {"confidence_metrics": {"overall": {"ece": {"bins": self.BINS}}}},
+            )
+        assert recorded == [("ts1", "v1")]

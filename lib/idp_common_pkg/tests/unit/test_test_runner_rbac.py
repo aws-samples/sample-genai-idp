@@ -71,6 +71,9 @@ class TestTestRunnerRBAC:
             patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
             patch.object(test_runner_index, "_capture_config") as mock_capture_config,
             patch.object(
+                test_runner_index, "_active_config_version", return_value="v1"
+            ),
+            patch.object(
                 test_runner_index, "_store_test_run_metadata"
             ) as _mock_store_metadata,
             patch.object(test_runner_index.sqs, "send_message") as mock_sqs,
@@ -114,6 +117,9 @@ class TestTestRunnerRBAC:
         with (
             patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
             patch.object(test_runner_index, "_capture_config") as mock_capture_config,
+            patch.object(
+                test_runner_index, "_active_config_version", return_value="v1"
+            ),
             patch.object(
                 test_runner_index, "_store_test_run_metadata"
             ) as _mock_store_metadata,
@@ -174,6 +180,9 @@ class TestTestRunnerRBAC:
             patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
             patch.object(test_runner_index, "_capture_config") as mock_capture_config,
             patch.object(
+                test_runner_index, "_active_config_version", return_value="v1"
+            ),
+            patch.object(
                 test_runner_index, "_store_test_run_metadata"
             ) as _mock_store_metadata,
             patch.object(test_runner_index.sqs, "send_message") as mock_sqs,
@@ -217,6 +226,9 @@ class TestTestRunnerRBAC:
         with (
             patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
             patch.object(test_runner_index, "_capture_config") as mock_capture_config,
+            patch.object(
+                test_runner_index, "_active_config_version", return_value="v1"
+            ),
             patch.object(
                 test_runner_index, "_store_test_run_metadata"
             ) as _mock_store_metadata,
@@ -267,6 +279,9 @@ class TestTestRunnerRBAC:
             patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
             patch.object(test_runner_index, "_capture_config") as mock_capture_config,
             patch.object(
+                test_runner_index, "_active_config_version", return_value="v1"
+            ),
+            patch.object(
                 test_runner_index, "_store_test_run_metadata"
             ) as mock_store_metadata,
             patch.object(test_runner_index.sqs, "send_message"),
@@ -303,6 +318,9 @@ class TestTestRunnerRBAC:
         with (
             patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
             patch.object(test_runner_index, "_capture_config") as mock_capture_config,
+            patch.object(
+                test_runner_index, "_active_config_version", return_value="v1"
+            ),
             patch.object(
                 test_runner_index, "_store_test_run_metadata"
             ) as mock_store_metadata,

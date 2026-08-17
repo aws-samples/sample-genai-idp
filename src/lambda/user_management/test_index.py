@@ -33,7 +33,7 @@ def env():
             "USER_POOL_ID": "us-east-1_test",
             "AWS_DEFAULT_REGION": "us-east-1",
             "AWS_ACCESS_KEY_ID": "testing",
-            "AWS_SECRET_ACCESS_KEY": "testing",
+            "AWS_SECRET_ACCESS_KEY": "testing",  # nosec B105 - dummy moto credential
         },
     ):
         yield
@@ -217,9 +217,7 @@ class TestUpdateUserScopeAxes:
         )
 
         with patch.object(index, "sync_user_to_cognito"):
-            result = index.update_user(
-                {"userId": "u-1", "allowedTestSets": ["set-b"]}
-            )
+            result = index.update_user({"userId": "u-1", "allowedTestSets": ["set-b"]})
 
         assert result["allowedTestSets"] == ["set-b"]
         assert result["allowedConfigVersions"] == ["v3"]
@@ -231,9 +229,7 @@ class TestUpdateUserScopeAxes:
         )
 
         with patch.object(index, "sync_user_to_cognito"):
-            result = index.update_user(
-                {"userId": "u-1", "allowedTestSets": None}
-            )
+            result = index.update_user({"userId": "u-1", "allowedTestSets": None})
 
         assert "allowedTestSets" not in result
         assert result["allowedConfigVersions"] == ["v3"]
@@ -262,9 +258,7 @@ class TestMissingCognitoSync:
             ),
             pytest.raises(RuntimeError),
         ):
-            index.create_user(
-                {"email": "doomed@example.com", "persona": "Annotator"}
-            )
+            index.create_user({"email": "doomed@example.com", "persona": "Annotator"})
 
         remaining = users_table.scan().get("Items", [])
         assert remaining == []

@@ -440,8 +440,25 @@ def handler(event, context):
         sample_item = items[0]
         has_item_type = "ItemType" in sample_item
         has_confidence_count = "ConfidenceAlertCount" in sample_item
-        if has_item_type and has_confidence_count:
-            logger.info(f"Sample item already has ItemType and ConfidenceAlertCount - backfill likely complete")
+
+        # A one-item sample can only answer "is an attribute missing?", never "is
+        # an attribute's VALUE now wrong?". The retype pass is the second kind: a
+        # legacy test-run document already carries ItemType="document", so it looks
+        # complete here while being exactly the row that needs rewriting — and the
+        # stacks holding those rows are precisely the ones that ran an earlier
+        # backfill and would be skipped. So a changed BackfillVersion starts the
+        # run unconditionally; the sample only short-circuits when this resource's
+        # properties are unchanged (a no-op stack update re-invoking Create).
+        version = str(event["ResourceProperties"].get("BackfillVersion", ""))
+        old_version = str(
+            (event.get("OldResourceProperties") or {}).get("BackfillVersion", "")
+        )
+        version_changed = version != old_version
+        if has_item_type and has_confidence_count and not version_changed:
+            logger.info(
+                "Sample item already has ItemType and ConfidenceAlertCount and "
+                f"BackfillVersion is unchanged ({version}) - nothing to do"
+            )
             _send_cfn_response(
                 event, context, "SUCCESS",
                 {"BackfillStatus": "ALREADY_DONE", "Reason": "All GSI attributes present"},
@@ -449,7 +466,11 @@ def handler(event, context):
             )
             return
         
-        logger.info(f"Backfill needed: ItemType={'present' if has_item_type else 'MISSING'}, ConfidenceAlertCount={'present' if has_confidence_count else 'MISSING'}")
+        logger.info(
+            f"Backfill needed: ItemType={'present' if has_item_type else 'MISSING'}, "
+            f"ConfidenceAlertCount={'present' if has_confidence_count else 'MISSING'}, "
+            f"BackfillVersion={old_version or '(none)'} -> {version}"
+        )
 
         # Start the backfill state machine
         sfn_client = boto3.client("stepfunctions")

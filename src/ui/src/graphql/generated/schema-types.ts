@@ -470,11 +470,16 @@ export type DocumentVersionFile = {
   VersionId?: Maybe<Scalars['String']['output']>;
 };
 
+export type DocumentView =
+  | 'PRODUCTION'
+  | 'TEST';
+
 export type DraftLabelJob = {
   completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   configVersion?: Maybe<Scalars['String']['output']>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
   error?: Maybe<Scalars['String']['output']>;
+  failedDocuments?: Maybe<Scalars['Int']['output']>;
   jobId: Scalars['String']['output'];
   labeled?: Maybe<Scalars['Int']['output']>;
   skippedAlreadyLabeled?: Maybe<Scalars['Int']['output']>;
@@ -1494,7 +1499,7 @@ export type QueryGetDocumentArgs = {
 export type QueryGetDocumentCountArgs = {
   endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
-  submissionSource?: InputMaybe<Scalars['String']['input']>;
+  view?: InputMaybe<DocumentView>;
 };
 
 
@@ -1608,7 +1613,7 @@ export type QueryListDocumentsArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
-  submissionSource?: InputMaybe<Scalars['String']['input']>;
+  view?: InputMaybe<DocumentView>;
 };
 
 

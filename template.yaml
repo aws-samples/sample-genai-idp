@@ -5050,8 +5050,12 @@ Resources:
       TrackingTableName: !Ref TrackingTable
       BackfillStateMachineArn: !Ref BackfillStateMachine
       TotalSegments: "10"
-      # Force re-evaluation on each stack update (bumped for ConfidenceAlertCount=0 repair)
-      BackfillVersion: "3.0"
+      # MUST be bumped by any change that needs the backfill to re-run.
+      # CloudFormation only sends an Update to a custom resource when one of its
+      # properties changes, so leaving this alone means the trigger is never
+      # invoked and the new backfill silently does not happen on upgrades.
+      # 4.0: retype pre-existing test-run documents to ItemType=test-document.
+      BackfillVersion: "4.0"
 
   ##############################################################################
   # DynamoDB table and initialization function for workflow concurrency counter
@@ -10838,6 +10842,7 @@ Resources:
           ADMIN_GROUP: !Ref AdminGroup
           AUTHOR_GROUP: !Ref AuthorGroup
           REVIEWER_GROUP: !Ref ReviewerGroup
+          ANNOTATOR_GROUP: !Ref AnnotatorGroup
           VIEWER_GROUP: !Ref ViewerGroup
           USERS_TABLE_NAME: !Ref UsersTable
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain

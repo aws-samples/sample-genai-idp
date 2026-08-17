@@ -16,6 +16,7 @@ from idp_common.evaluation.confidence_curve import (  # type: ignore
     estimate_for_target,
 )
 from idp_common.evaluation.curve_store import CurveStore  # type: ignore
+from idp_common.models import Status  # type: ignore
 from idp_common.s3 import find_matching_files  # type: ignore
 from idp_common.testset_scope import (  # type: ignore
     assert_can_access_test_set,
@@ -1018,6 +1019,7 @@ def _label_job_to_result(item):
         "createdAt": item.get("createdAt"),
         "completedAt": item.get("completedAt"),
         "skippedAlreadyLabeled": int(item.get("skippedAlreadyLabeled", 0) or 0),
+        "failedDocuments": len(item.get("failedFiles") or []),
     }
 
 
@@ -1078,26 +1080,45 @@ def _walk_confidence(explainability_info):
     return found
 
 
+def _field_path(prefix, key):
+    """Join a field path segment, matching ``curve_store``'s path convention."""
+    return f"{prefix}.{key}" if prefix else key
+
+
+def _list_item_path(prefix, node, index):
+    """Path for one member of a list.
+
+    A single-element list adds no level: ``explainability_info`` arrives wrapped in
+    one, and adding a level there would misalign it from ``inference_result``.
+    """
+    return prefix if len(node) == 1 else f"{prefix}[{index}]"
+
+
 def _absent_field_paths(inference_result):
-    """Leaf names whose extracted value is absent (null / "" / empty container).
+    """Field *paths* whose extracted value is absent (null / "" / empty container).
 
     A field the document does not contain is assessed at confidence 0.0, which is a
     correct reading of a blank box but indistinguishable from real uncertainty once
     reduced to a number. Callers exclude these from headline scores.
+
+    Paths, not bare leaf names: one empty ``Description`` cell would otherwise
+    exclude *every* Description score in a 200-row transaction table, understating
+    review need on exactly the table-heavy documents this feature targets. The path
+    shape matches :func:`_walk_confidence_named` and ``curve_store._flatten_values``.
     """
     absent = set()
 
-    def walk(node, name=None):
+    def walk(node, prefix=""):
         if isinstance(node, dict):
             for key, child in node.items():
-                walk(child, key)
+                walk(child, _field_path(prefix, key))
         elif isinstance(node, list):
-            if not node and name:
-                absent.add(name)
-            for child in node:
-                walk(child, name)
-        elif name and (node is None or node == ""):
-            absent.add(name)
+            if not node and prefix:
+                absent.add(prefix)
+            for index, child in enumerate(node):
+                walk(child, _list_item_path(prefix, node, index))
+        elif prefix and (node is None or node == ""):
+            absent.add(prefix)
 
     walk(inference_result)
     return absent
@@ -1132,10 +1153,15 @@ def _min_confidence(explainability_info, inference_result=None):
 
 
 def _walk_confidence_named(explainability_info):
-    """As :func:`_walk_confidence`, plus the field name each score belongs to."""
+    """As :func:`_walk_confidence`, plus the field *path* each score belongs to.
+
+    Paths are built the same way as :func:`_absent_field_paths`, so the two line up
+    per occurrence rather than per field name — see that function for why the
+    distinction matters on tables.
+    """
     found = []
 
-    def walk(node, name=None):
+    def walk(node, prefix=""):
         if isinstance(node, dict):
             value = node.get("confidence")
             if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -1144,13 +1170,13 @@ def _walk_confidence_named(explainability_info):
                     threshold, bool
                 ):
                     threshold = None
-                found.append((float(value), threshold, name))
+                found.append((float(value), threshold, prefix or None))
             for key, child in node.items():
                 if key != "confidence":
-                    walk(child, key)
+                    walk(child, _field_path(prefix, key))
         elif isinstance(node, list):
-            for child in node:
-                walk(child, name)
+            for index, child in enumerate(node):
+                walk(child, _list_item_path(prefix, node, index))
 
     walk(explainability_info)
     return found
@@ -1557,6 +1583,19 @@ MAX_SECTIONS_FOR_FIELD_SAMPLE = 40
 # short leaves the job RUNNING and the next poll continues.
 HARVEST_TIME_BUDGET_SECONDS = 20
 
+# Document states the pipeline never leaves. A labeling job waiting on one of
+# these would never complete, and every caller that shows a job re-harvests on a
+# timer, so the wait is not free. Derived from the enum rather than spelled out, so
+# a new terminal state cannot silently start hanging jobs.
+TERMINAL_DOCUMENT_STATUSES = frozenset(
+    s.value for s in (Status.FAILED, Status.ABORTED, Status.REDACTED_SUPERSEDED)
+)
+
+# How long a job waits for a document that has no tracking record at all before
+# giving up on it. Absence cannot be distinguished from "not started yet", so this
+# is deliberately far beyond any plausible processing time.
+STALE_LABEL_JOB_HOURS = 6
+
 
 def _collect_doc_confidences(test_set_id):
     """Per-document minimum confidence, plus observed doc shape for the effort model.
@@ -1685,6 +1724,19 @@ def _count_baseline_fields(bucket, key):
     return count(inference) if inference else None
 
 
+def _label_job_is_stale(job):
+    """True when a job is old enough that a missing document will never arrive."""
+    created = str(job.get("createdAt") or "")
+    if not created:
+        return False
+    try:
+        started = datetime.fromisoformat(created.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    age_hours = (datetime.now(started.tzinfo) - started).total_seconds() / 3600.0
+    return age_hours >= STALE_LABEL_JOB_HOURS
+
+
 def _harvest_label_job(job, deadline=None):
     """Copy finished pipeline results into the test set's baseline as drafts.
 
@@ -1723,10 +1775,12 @@ def _harvest_label_job(job, deadline=None):
     files = [f for f in (run.get("Files") or []) if not wanted or f in wanted]
 
     done = set(job.get("harvestedFiles") or [])
+    failed = list(job.get("failedFiles") or [])
+    resolved = done | set(failed)
     pending = 0
     out_of_time = False
     for file_name in files:
-        if file_name in done:
+        if file_name in resolved:
             continue
         if deadline is not None and time.monotonic() > deadline:
             # Remaining documents are pending, not lost: the job stays RUNNING and
@@ -1738,8 +1792,31 @@ def _harvest_label_job(job, deadline=None):
         doc = tracking_table.get_item(
             Key={"PK": f"doc#{job_id}/{file_name}", "SK": "none"}
         ).get("Item")
-        if not doc or doc.get("ObjectStatus") != "COMPLETED":
-            pending += 1
+        status = (doc or {}).get("ObjectStatus")
+        if status != "COMPLETED":
+            if doc is None and _label_job_is_stale(job):
+                # No tracking item at all: either the copy never landed or the
+                # document was removed. Indistinguishable from "not started yet" by
+                # status, so it is only given up on once the job is far past any
+                # plausible processing time.
+                logger.warning(
+                    f"Draft labeling job {job_id}: no tracking record for "
+                    f"'{file_name}' after {STALE_LABEL_JOB_HOURS}h; recording it "
+                    "as failed"
+                )
+                failed.append(file_name)
+            elif status in TERMINAL_DOCUMENT_STATUSES:
+                # Resolved with an error, not pending. Counting a document that has
+                # already failed as pending left the job RUNNING forever — and every
+                # caller that displays a job drives the harvest on a timer, so the
+                # banner never cleared and each tick re-read the whole set.
+                logger.warning(
+                    f"Draft labeling job {job_id}: '{file_name}' ended {status}; "
+                    "recording it as failed rather than waiting for it"
+                )
+                failed.append(file_name)
+            else:
+                pending += 1
             continue
 
         try:
@@ -1772,19 +1849,39 @@ def _harvest_label_job(job, deadline=None):
                 f"Draft labeling: failed to harvest '{file_name}' for job {job_id}: {e}"
             )
 
-    status = "RUNNING" if pending else "COMPLETED"
     labeled = len(done)
+    if pending:
+        status = "RUNNING"
+    elif failed and not labeled:
+        # Nothing to harvest and nothing left to wait for.
+        status = "FAILED"
+    else:
+        status = "COMPLETED"
     now = datetime.utcnow().isoformat() + "Z"
-    update_expr = "SET #st = :s, labeled = :n, harvestedFiles = :h"
-    expr_values = {":s": status, ":n": labeled, ":h": sorted(done)}
-    if status == "COMPLETED":
+    update_expr = "SET #st = :s, labeled = :n, harvestedFiles = :h, failedFiles = :f"
+    expr_values = {
+        ":s": status,
+        ":n": labeled,
+        ":h": sorted(done),
+        ":f": sorted(set(failed)),
+    }
+    if status == "FAILED":
+        update_expr += ", #er = :e"
+        expr_values[":e"] = (
+            f"All {len(set(failed))} document(s) failed processing; no labels were "
+            "produced"
+        )
+    if status in ("COMPLETED", "FAILED"):
         update_expr += ", completedAt = :c"
         expr_values[":c"] = now
 
+    expr_names = {"#st": "status"}
+    if status == "FAILED":
+        expr_names["#er"] = "error"
     db_client.update_item(
         key={"PK": f"testset#{test_set_id}", "SK": _label_job_sk(job_id)},
         update_expression=update_expr,
-        expression_attribute_names={"#st": "status"},
+        expression_attribute_names=expr_names,
         expression_attribute_values=expr_values,
     )
 
@@ -1802,7 +1899,7 @@ def _harvest_label_job(job, deadline=None):
 
     logger.info(
         f"Draft labeling job {job_id}: labeled={labeled} pending={pending} "
-        f"status={status}"
+        f"failed={len(set(failed))} status={status}"
         + (
             f" (stopped after {HARVEST_TIME_BUDGET_SECONDS}s; resuming on the "
             "next poll)"
@@ -1812,9 +1909,16 @@ def _harvest_label_job(job, deadline=None):
     )
     updated = dict(job)
     updated.update(
-        {"status": status, "labeled": labeled, "harvestedFiles": sorted(done)}
+        {
+            "status": status,
+            "labeled": labeled,
+            "harvestedFiles": sorted(done),
+            "failedFiles": sorted(set(failed)),
+        }
     )
-    if status == "COMPLETED":
+    if status == "FAILED":
+        updated["error"] = expr_values[":e"]
+    if status in ("COMPLETED", "FAILED"):
         updated["completedAt"] = now
     return updated
 
@@ -1981,6 +2085,8 @@ def remove_documents_from_test_set(args):
     target the mutable working draft; a later publish cuts the next version.
     """
     test_set_id = args["testSetId"]
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
     file_names = args["fileNames"]
     logger.info(f"Removing {len(file_names)} document(s) from test set {test_set_id}")
 

@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -93,6 +94,47 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
 
+def _drafting_config_versions(table, test_set_id: str, exclude_run_id: str) -> set:
+    """Config versions that produced any of this set's draft labels.
+
+    Labeling-job items are per-run (SK ``labeljob#{runId}``) and the job id *is* a
+    test run id, so each one's run record carries the version the runner resolved —
+    no extra field to keep in sync. Returns an empty set if the jobs cannot be read,
+    which makes the caller's guard fail *open*: a curve that misses a refusal is
+    recoverable (reset and rebuild), whereas dropping every observation on a
+    transient read error would silently stop the estimator from ever measuring.
+    """
+    versions = set()
+    try:
+        start_key = None
+        for _ in range(20):
+            kwargs = {
+                "KeyConditionExpression": Key("PK").eq(f"testset#{test_set_id}")
+                & Key("SK").begins_with("labeljob#"),
+            }
+            if start_key:
+                kwargs["ExclusiveStartKey"] = start_key
+            page = table.query(**kwargs)
+            for job in page.get("Items") or []:
+                run_id = job.get("jobId")
+                if not run_id or run_id == exclude_run_id:
+                    continue
+                version = (
+                    table.get_item(
+                        Key={"PK": f"testrun#{run_id}", "SK": "metadata"}
+                    ).get("Item")
+                    or {}
+                ).get("ConfigVersion")
+                if version:
+                    versions.add(version)
+            start_key = page.get("LastEvaluatedKey")
+            if not start_key:
+                break
+    except Exception as e:  # noqa: BLE001 — see docstring: guard fails open
+        logger.warning(f"Could not resolve drafting configs for {test_set_id}: {e}")
+    return versions
+
+
 def _record_confidence_curve(
     test_run_id: str, tracking_table_name: str, result: Dict[str, Any]
 ) -> None:
@@ -146,23 +188,11 @@ def _record_confidence_curve(
             )
             or {}
         )
-        # The drafting job id is itself a test run id, so its record carries the
-        # config version the runner resolved — no extra field to keep in sync.
-        drafting_run_id = test_set.get("labelJobId")
-        drafted_by = None
-        if drafting_run_id and drafting_run_id != test_run_id:
-            drafted_by = (
-                table.get_item(
-                    Key={"PK": f"testrun#{drafting_run_id}", "SK": "metadata"}
-                ).get("Item")
-                or {}
-            ).get("ConfigVersion")
-        if (
-            test_set.get("labelState") == "draft"
-            and run_config
-            and drafted_by
-            and run_config == drafted_by
-        ):
+        # Every labeling job, not just the set's current pointer: a one-document
+        # re-extract repoints it, so reading only the newest job would let a run
+        # score the config that drafted the *other* 199 documents.
+        drafted_by = _drafting_config_versions(table, test_set_id, test_run_id)
+        if test_set.get("labelState") == "draft" and run_config in drafted_by:
             logger.info(
                 f"Skipping confidence-curve update for {test_set_id}: run scored "
                 f"config '{run_config}' against labels that config drafted, which "

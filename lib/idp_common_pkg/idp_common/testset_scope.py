@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -202,27 +202,3 @@ def assert_can_access_test_set(
         "Unauthorized: test-set annotation requires Admin, Author or a scoped "
         "Annotator account"
     )
-
-
-def visible_test_sets(
-    event: Optional[Dict[str, Any]],
-    candidates: Sequence[str],
-    users_table: Any = None,
-) -> List[str]:
-    """Filter a list of test-set ids down to those the caller may see.
-
-    Used by list operations, where denying the whole request would be wrong: an
-    annotator listing test sets should see their own, not an error.
-    """
-    if is_direct_invoke(event):
-        return list(candidates)
-
-    groups = caller_groups(event)
-    if any(group in groups for group in UNSCOPED_GROUPS):
-        return list(candidates)
-
-    if ANNOTATOR_GROUP in groups:
-        allowed = set(get_allowed_test_sets(caller_email(event), users_table) or [])
-        return [c for c in candidates if c in allowed]
-
-    return []

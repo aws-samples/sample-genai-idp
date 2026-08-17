@@ -215,9 +215,10 @@ def update_user(args):
 
     user_record = response["Item"]
 
-    # Don't allow editing Admin users' scope
+    # Admin is unscoped on every axis (config versions and test sets), so scoping
+    # one would read as a restriction the authorizers do not enforce.
     if user_record.get("persona") == "Admin":
-        raise ValueError("Cannot set config version scope for Admin users")
+        raise ValueError("Cannot set access scope for Admin users")
 
     set_parts = ["updatedAt = :now"]
     remove_parts = []

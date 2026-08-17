@@ -692,3 +692,31 @@ class TestAnnotatorReviewScope:
             module.handler(event, None)
         except Exception as e:
             assert "Unauthorized" not in str(e), e
+
+    def test_annotator_who_is_also_a_reviewer_stays_scoped(self, scoped_env):
+        """Holding both groups must intersect the two gates, not disable one.
+
+        Exempting Reviewer turned object scope off entirely for a double-assigned
+        user, and disagreed with testset_scope, which refuses that caller. Annotators
+        are assigned by hand in Cognito (no external-IdP mapping for the role), so a
+        double assignment is an easy mistake.
+        """
+        module, table, s3 = scoped_env
+        _seed_review_doc(table, s3, object_key="run2/b.pdf", test_set_id="ts-other")
+        event = self._annotator_event("claimReview", "run2/b.pdf")
+        event["identity"]["claims"]["cognito:groups"] = ["Annotator", "Reviewer"]
+
+        with pytest.raises(ValueError, match="Unauthorized"):
+            module.handler(event, None)
+
+    def test_annotator_who_is_also_an_author_is_unscoped(self, scoped_env):
+        """Author owns test sets, so it is exempt in both layers."""
+        module, table, s3 = scoped_env
+        _seed_review_doc(table, s3, object_key="run2/b.pdf", test_set_id="ts-other")
+        event = self._annotator_event("claimReview", "run2/b.pdf")
+        event["identity"]["claims"]["cognito:groups"] = ["Annotator", "Author"]
+
+        try:
+            module.handler(event, None)
+        except Exception as e:
+            assert "Unauthorized" not in str(e), e

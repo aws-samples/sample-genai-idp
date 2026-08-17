@@ -145,19 +145,19 @@ def handler(event, context):
         raise ValueError(f"Unknown field: {field_name}")
 
 
-def _item_type_for_view(mode):
+def _item_type_for_view(view):
     """Which TypeDateIndex hash key to query for the requested view.
 
-    "production" (the default) lists ordinary uploads; "test" lists documents
-    submitted by Test Studio or Auto Optimizer. The views are mutually exclusive
-    by design; there is no combined view.
+    PRODUCTION (the default) lists ordinary uploads; TEST lists documents submitted
+    by Test Studio or Auto Optimizer. The views are mutually exclusive by design;
+    there is no combined view.
 
     Selecting on the index key rather than filtering a projected attribute keeps
     pagination exact: DynamoDB applies FilterExpression after Limit, so a filtered
     page of 50 can return a single row plus a nextToken, with no indication that
     the rest were dropped.
     """
-    return ITEM_TYPE_TEST_DOCUMENT if (mode or "").lower() == "test" else ITEM_TYPE_DOCUMENT
+    return ITEM_TYPE_TEST_DOCUMENT if str(view or "").upper() == "TEST" else ITEM_TYPE_DOCUMENT
 
 
 def list_documents(event):
@@ -200,7 +200,7 @@ def list_documents(event):
     }
     
     # Key condition: the ItemType selects the view (production vs test-submitted).
-    item_type = _item_type_for_view(args.get("submissionSource"))
+    item_type = _item_type_for_view(args.get("view"))
     if start_dt and end_dt:
         query_kwargs["KeyConditionExpression"] = (
             Key("ItemType").eq(item_type) &
@@ -341,7 +341,7 @@ def get_document_count(event):
     
     # Build GSI count query. Must use the same view as listDocuments, or the
     # header count would not match the rows on screen.
-    item_type = _item_type_for_view(args.get("submissionSource"))
+    item_type = _item_type_for_view(args.get("view"))
     query_kwargs = {
         "IndexName": TYPE_DATE_INDEX,
         "Select": "COUNT",

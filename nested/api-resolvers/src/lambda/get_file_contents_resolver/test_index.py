@@ -95,7 +95,9 @@ def test_get_file_presigned_url_missing_object_raises(resolver):
     index, _ = resolver
     with pytest.raises(Exception, match="File not found"):
         index.handler(
-            _event("getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/doc/does-not-exist.json"),
+            _event(
+                "getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/doc/does-not-exist.json"
+            ),
             None,
         )
 
@@ -228,7 +230,9 @@ def test_presigned_url_does_not_force_inline_for_non_renderable_types(resolver):
         _event("getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/doc/report.xlsx"), None
     )
 
-    assert "response-content-disposition" not in _response_params(result["presignedUrl"])
+    assert "response-content-disposition" not in _response_params(
+        result["presignedUrl"]
+    )
 
 
 @pytest.mark.unit
@@ -241,3 +245,44 @@ def test_is_inline_renderable_classification(resolver):
     assert not index._is_inline_renderable("application/octet-stream")
     assert not index._is_inline_renderable("")
     assert not index._is_inline_renderable(None)
+
+
+@pytest.mark.unit
+def test_script_bearing_types_are_forced_to_download(resolver):
+    """An uploaded .html/.svg must not render on the bucket origin.
+
+    Both fall under renderable prefixes (text/, image/), so the earlier rule served
+    them inline. Declining to say "inline" is not enough either: with no disposition
+    the browser decides from Content-Type alone and still renders text/html.
+    """
+    index, s3 = resolver
+    for key, stored in (
+        ("doc/evil.html", "text/html"),
+        ("doc/evil.svg", "image/svg+xml"),
+        # Uploaded without a type, so the resolver guesses from the extension.
+        ("doc/guessed.html", "binary/octet-stream"),
+    ):
+        s3.put_object(
+            Bucket=OUTPUT_BUCKET,
+            Key=key,
+            Body=b"<script>1</script>",
+            ContentType=stored,
+        )
+        result = index.handler(
+            _event("getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/{key}"), None
+        )
+        params = _response_params(result["presignedUrl"])
+        assert params.get("response-content-disposition") == ["attachment"], key
+
+
+@pytest.mark.unit
+def test_executable_type_classification(resolver):
+    index, _ = resolver
+    assert not index._is_inline_renderable("text/html")
+    assert not index._is_inline_renderable("image/svg+xml")
+    assert not index._is_inline_renderable("TEXT/HTML; charset=utf-8")
+    assert index._is_executable_type("text/html")
+    # Plain text and raster images stay renderable.
+    assert index._is_inline_renderable("text/plain")
+    assert index._is_inline_renderable("image/png")
+    assert not index._is_executable_type("image/png")

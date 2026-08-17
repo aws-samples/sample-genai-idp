@@ -136,8 +136,13 @@ def handler(event, context):
         timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         test_run_id = f"{test_set['name']}-{timestamp}"
 
-        # Capture config for the specified version or current active config
-        config = _capture_config(config_table, config_version)
+        # Resolve first, then capture, so the version is recorded on the run whether
+        # or not the caller named one. Passing the resolved name through also keeps
+        # this to a single scan of the config table.
+        effective_config_version = config_version or _active_config_version(
+            config_table
+        )
+        config = _capture_config(config_table, effective_config_version)
 
         # Pin the ground-truth version scored against (symmetric to ConfigVersion),
         # so comparisons can separate config drift from ground-truth drift. None for
@@ -154,7 +159,7 @@ def handler(event, context):
             [],
             test_context,
             files_to_process,
-            config_version,
+            effective_config_version,
             test_set_version,
         )
 
@@ -191,9 +196,13 @@ def handler(event, context):
         if object_keys:
             message_body["objectKeys"] = object_keys
 
-        # Include configVersion if specified
-        if config_version is not None:
-            message_body["configVersion"] = config_version
+        # Pin the resolved version, not just an explicitly-requested one: the copier
+        # stamps this onto each object and the pipeline processes under it, so
+        # leaving it unset let the active config change between submit and
+        # processing — and the run's recorded ConfigVersion would then name a config
+        # the documents were never processed with.
+        if effective_config_version is not None:
+            message_body["configVersion"] = effective_config_version
 
         # The copier must not stage baselines for a draft-labeling run: the baseline
         # is what the run is creating, so scoring against it would compare the
@@ -340,6 +349,12 @@ def _decompress_config_item(item):
     return full_item
 
 
+# Ceiling on pages walked looking for the active config row. Each page examines
+# ~1MB of items and projects a single attribute, so this is far more versions than
+# a deployment holds.
+_MAX_CONFIG_SCAN_PAGES = 50
+
+
 def _resolve_active_config_key(table):
     """Return the key ('Config#<version>') of the IsActive=true row, or None.
 
@@ -361,14 +376,37 @@ def _resolve_active_config_key(table):
         },
         "ProjectionExpression": "Configuration",
     }
-    while True:
+    # Bounded: an unbounded paging loop spins forever if the table ever returns a
+    # repeating LastEvaluatedKey, and it hangs rather than fails under a mocked
+    # table, which is far harder to diagnose than a wrong answer.
+    for _ in range(_MAX_CONFIG_SCAN_PAGES):
         response = table.scan(**scan_kwargs)
         for item in response.get('Items', []):
             return item['Configuration']
         last_key = response.get('LastEvaluatedKey')
-        if not last_key:
+        if not last_key or last_key == scan_kwargs.get('ExclusiveStartKey'):
             return None
         scan_kwargs['ExclusiveStartKey'] = last_key
+    logger.warning(
+        "No active config version found within %d scan pages; giving up",
+        _MAX_CONFIG_SCAN_PAGES,
+    )
+    return None
+
+
+def _active_config_version(config_table):
+    """Name of the active config version, or None.
+
+    Resolved before capture so the run's ``ConfigVersion`` is recorded even when the
+    caller did not name a version. Without it every run started against "Active
+    configuration" — the UI default — stored no version at all, which silently
+    disables anything comparing a run's config to another's: notably the guard that
+    refuses to score a config against the labels that same config drafted.
+    """
+    key = _resolve_active_config_key(dynamodb.Table(config_table))  # type: ignore[attr-defined]
+    if not key or not key.startswith("Config#"):
+        return None
+    return key[len("Config#") :] or None
 
 
 def _capture_config(config_table, config_version=None):

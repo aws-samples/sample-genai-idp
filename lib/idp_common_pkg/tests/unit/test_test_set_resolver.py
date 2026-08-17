@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import boto3
@@ -1354,6 +1355,45 @@ class TestTestSetResolver:
         assert test_set_index._alert_counts(explainability) == (2, 3)
         assert test_set_index._alert_counts(explainability, inference) == (1, 2)
 
+    def test_one_blank_table_cell_does_not_excuse_the_whole_column(self):
+        """Absent-field exclusion is per occurrence, not per field name.
+
+        Keying on the bare leaf name meant one empty Description in a transaction
+        table excluded *every* Description score from minConfidence and alertCount —
+        understating review need on precisely the table-heavy documents (bank
+        statements) this feature exists for.
+        """
+        explainability = [
+            {
+                "Transactions": [
+                    {
+                        "Description": {"confidence": 0.0},
+                        "Amount": {"confidence": 0.99},
+                    },
+                    {
+                        "Description": {"confidence": 0.4},
+                        "Amount": {"confidence": 0.98},
+                    },
+                    {
+                        "Description": {"confidence": 0.3},
+                        "Amount": {"confidence": 0.97},
+                    },
+                ]
+            }
+        ]
+        inference = {
+            "Transactions": [
+                {"Description": None, "Amount": "-44.00"},
+                {"Description": "Online Retail", "Amount": "-12.00"},
+                {"Description": "Transport", "Amount": "-57.00"},
+            ]
+        }
+        # Row 0's blank Description is excluded; rows 1 and 2 still alert.
+        alerts, fields = test_set_index._alert_counts(explainability, inference)
+        assert (alerts, fields) == (2, 5)
+        # And the weakest *populated* field drives the headline, not the blank one.
+        assert test_set_index._min_confidence(explainability, inference) == 0.3
+
     def test_alert_counts_reports_none_without_confidence_data(self):
         """None means "no confidence data", which is not the same as zero alerts."""
         assert test_set_index._alert_counts(None) == (None, None)
@@ -1522,6 +1562,146 @@ class TestTestSetResolver:
             )
             is False
         )
+
+    def test_a_failed_document_does_not_hold_the_job_open_forever(self, labeling_env):
+        """A terminal document is resolved-with-error, not pending.
+
+        Counting it as pending kept the job RUNNING indefinitely, and every caller
+        that displays a job drives the harvest on a timer — so the workspace
+        re-polled every 5s forever, each tick re-reading the set, and the "labeling
+        in progress" banner never cleared.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        uri = _seed_pipeline_result(
+            s3, "ts1-run/a.pdf/sections/1/result.json", {"vendor": "Acme"}
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf", "b.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "doc#ts1-run/b.pdf",
+                "SK": "none",
+                "ObjectStatus": "FAILED",
+                "Sections": [],
+            }
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 2,
+                "labeled": 0,
+            }
+        )
+
+        result = test_set_index.get_draft_label_job(
+            {"testSetId": "ts1", "jobId": "ts1-run"}
+        )
+        assert result["status"] == "COMPLETED"
+        assert result["labeled"] == 1
+        # The count is what explains why labeled < total.
+        assert result["failedDocuments"] == 1
+        # And it is not retried on the next poll.
+        job = table.get_item(Key={"PK": "testset#ts1", "SK": "labeljob#ts1-run"})[
+            "Item"
+        ]
+        assert job["failedFiles"] == ["b.pdf"]
+
+    def test_a_job_whose_every_document_failed_is_marked_failed(self, labeling_env):
+        """Nothing harvested and nothing left to wait for is a failure, not success."""
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        _seed_completed_run(table, "ts1-run", "ts1", ["a.pdf"], {})
+        table.put_item(
+            Item={
+                "PK": "doc#ts1-run/a.pdf",
+                "SK": "none",
+                "ObjectStatus": "ABORTED",
+                "Sections": [],
+            }
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        result = test_set_index.get_draft_label_job(
+            {"testSetId": "ts1", "jobId": "ts1-run"}
+        )
+        assert result["status"] == "FAILED"
+        assert "failed processing" in (result["error"] or "")
+        # labelState must not advance to "draft" — there are no drafts.
+        meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
+        assert meta.get("labelState") != "draft"
+
+    def test_a_missing_tracking_record_is_pending_until_the_job_is_stale(
+        self, labeling_env
+    ):
+        """Absence cannot be told from "not started yet", so it waits — for a while."""
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        # Deliberately no doc# item for a.pdf: the copy never produced one.
+        table.put_item(
+            Item={
+                "PK": "testrun#ts1-run",
+                "SK": "metadata",
+                "TestSetId": "ts1",
+                "Files": ["a.pdf"],
+                "Status": "RUNNING",
+            }
+        )
+        job_item = {
+            "PK": "testset#ts1",
+            "SK": "labeljob#ts1-run",
+            "testSetId": "ts1",
+            "jobId": "ts1-run",
+            "status": "RUNNING",
+            "total": 1,
+            "labeled": 0,
+            # Relative, not hardcoded: a fixed date silently ages past the
+            # staleness window and the test starts asserting the opposite case.
+            "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        table.put_item(Item=job_item)
+        assert (
+            test_set_index.get_draft_label_job(
+                {"testSetId": "ts1", "jobId": "ts1-run"}
+            )["status"]
+            == "RUNNING"
+        )
+
+        # Same job, long past any plausible processing time.
+        job_item["createdAt"] = (
+            (
+                datetime.now(timezone.utc)
+                - timedelta(hours=test_set_index.STALE_LABEL_JOB_HOURS + 1)
+            )
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        job_item["status"] = "RUNNING"
+        table.put_item(Item=job_item)
+        result = test_set_index.get_draft_label_job(
+            {"testSetId": "ts1", "jobId": "ts1-run"}
+        )
+        assert result["status"] == "FAILED"
+        assert result["failedDocuments"] == 1
 
     def test_harvest_stays_running_while_documents_are_pending(self, labeling_env):
         table, s3 = labeling_env
