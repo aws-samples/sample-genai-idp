@@ -559,7 +559,15 @@ STDERR:
         """Compare two version strings. Returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2"""
 
         def normalize(v):
-            return [int(x) for x in v.split(".")]
+            # Handle nightly/dev builds (e.g. "dev202606120901") — treat as very high version
+            parts = []
+            for x in v.split("."):
+                try:
+                    parts.append(int(x))
+                except ValueError:
+                    # Non-numeric segment (e.g. nightly "dev...") — treat as 999 to pass version check
+                    parts.append(999)
+            return parts
 
         v1_parts = normalize(version1)
         v2_parts = normalize(version2)

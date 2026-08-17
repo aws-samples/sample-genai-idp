@@ -267,6 +267,12 @@ type UpdateConfigurationResponse @aws_cognito_user_pools @aws_iam {
   error: ConfigurationError
 }
 
+type GenerateRuleJsonResponse @aws_cognito_user_pools {
+  success: Boolean!
+  ruleJson: AWSJSON
+  error: ConfigurationError
+}
+
 type SyncBdaIdpResponse @aws_cognito_user_pools @aws_iam {
   success: Boolean!
   message: String
@@ -1178,6 +1184,8 @@ type Mutation {
   updateConfiguration(versionName: String!, customConfig: AWSJSON!, description: String): UpdateConfigurationResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   setActiveVersion(versionName: String!): UpdateConfigurationResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  generateRuleJson(ruleDescription: String!): GenerateRuleJsonResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   syncBdaIdp(direction: String, versionName: String, bdaProjectArn: String, saveArn: Boolean, syncMode: String): SyncBdaIdpResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])

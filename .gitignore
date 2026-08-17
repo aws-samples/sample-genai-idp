@@ -124,3 +124,11 @@ live-testsets-snapshot.md
 # draw.io editor backup files
 *.bkp
 .$*
+
+# Z3 development/test artifacts
+Dockerfile.z3-github
+docs/design/
+insurance-underwriting-demo/
+notebook/
+test_z3/
+*.whl

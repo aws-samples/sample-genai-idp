@@ -181,6 +181,13 @@ The solution creates various IAM roles to run different components of the system
   * Managed policy `AmazonAPIGatewayPushToCloudWatchLogs` (assumed by `apigateway.amazonaws.com`)
   * Registered as the account-level API Gateway CloudWatch role (`AWS::ApiGateway::Account`) to enable REST API stage access logging. This setting is per account per region and is retained on stack deletion so other stacks' logging keeps working.
 
+* **Configuration Resolver Role** (API resolver Lambda for configuration CRUD + Z3 RuleJSON generation):
+  * `dynamodb:GetItem`, `dynamodb:PutItem`, `dynamodb:UpdateItem`, `dynamodb:DeleteItem`, `dynamodb:Query`
+  * `s3:GetObject` (configuration bucket)
+  * `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`
+  * `bedrock:InvokeModel` (foundation models + inference profiles, for Z3 RuleJSON translation via `generateRuleJson` mutation)
+  * `bedrock:DeleteDataAutomationProject`, `bedrock:GetDataAutomationProject`, `bedrock:DeleteBlueprint`, `bedrock:ListBlueprints`
+
 * **Cognito Authentication Role**:
   * `appsync:GraphQL`
   * `s3:GetObject` (for UI assets and buckets)

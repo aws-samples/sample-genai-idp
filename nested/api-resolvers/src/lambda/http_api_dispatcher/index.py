@@ -113,6 +113,7 @@ FIELD_ALIASES: Dict[str, str] = {
     "updateConfiguration": "deleteConfigVersion",
     "updateModelConfigLimits": "deleteConfigVersion",
     "updatePricing": "deleteConfigVersion",
+    "generateRuleJson": "deleteConfigVersion",
     # compareTestRuns (TestResultsResolverFunction)
     "getTestRun": "compareTestRuns",
     "getTestRunStatus": "compareTestRuns",

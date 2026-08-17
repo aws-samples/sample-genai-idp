@@ -596,6 +596,12 @@ export type GenerateDraftLabelsInput = {
   testSetId: Scalars['String']['input'];
 };
 
+export type GenerateRuleJsonResponse = {
+  error?: Maybe<ConfigurationError>;
+  ruleJson?: Maybe<Scalars['AWSJSON']['output']>;
+  success: Scalars['Boolean']['output'];
+};
+
 /**
  * A feature installed in this IDP stack via AWS Marketplace (or the simulator).
  *
@@ -735,6 +741,7 @@ export type Mutation = {
   deleteTests: Scalars['Boolean']['output'];
   deleteUser?: Maybe<Scalars['Boolean']['output']>;
   generateDraftLabels?: Maybe<DraftLabelJob>;
+  generateRuleJson?: Maybe<GenerateRuleJsonResponse>;
   pauseCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
@@ -969,6 +976,11 @@ export type MutationDeleteUserArgs = {
 
 export type MutationGenerateDraftLabelsArgs = {
   input: GenerateDraftLabelsInput;
+};
+
+
+export type MutationGenerateRuleJsonArgs = {
+  ruleDescription: Scalars['String']['input'];
 };
 
 
