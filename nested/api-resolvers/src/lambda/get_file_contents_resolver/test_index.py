@@ -95,9 +95,7 @@ def test_get_file_presigned_url_missing_object_raises(resolver):
     index, _ = resolver
     with pytest.raises(Exception, match="File not found"):
         index.handler(
-            _event(
-                "getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/doc/does-not-exist.json"
-            ),
+            _event("getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/doc/does-not-exist.json"),
             None,
         )
 
@@ -230,9 +228,7 @@ def test_presigned_url_does_not_force_inline_for_non_renderable_types(resolver):
         _event("getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/doc/report.xlsx"), None
     )
 
-    assert "response-content-disposition" not in _response_params(
-        result["presignedUrl"]
-    )
+    assert "response-content-disposition" not in _response_params(result["presignedUrl"])
 
 
 @pytest.mark.unit

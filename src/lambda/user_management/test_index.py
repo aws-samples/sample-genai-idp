@@ -217,7 +217,9 @@ class TestUpdateUserScopeAxes:
         )
 
         with patch.object(index, "sync_user_to_cognito"):
-            result = index.update_user({"userId": "u-1", "allowedTestSets": ["set-b"]})
+            result = index.update_user(
+                {"userId": "u-1", "allowedTestSets": ["set-b"]}
+            )
 
         assert result["allowedTestSets"] == ["set-b"]
         assert result["allowedConfigVersions"] == ["v3"]
@@ -229,7 +231,9 @@ class TestUpdateUserScopeAxes:
         )
 
         with patch.object(index, "sync_user_to_cognito"):
-            result = index.update_user({"userId": "u-1", "allowedTestSets": None})
+            result = index.update_user(
+                {"userId": "u-1", "allowedTestSets": None}
+            )
 
         assert "allowedTestSets" not in result
         assert result["allowedConfigVersions"] == ["v3"]
@@ -258,7 +262,9 @@ class TestMissingCognitoSync:
             ),
             pytest.raises(RuntimeError),
         ):
-            index.create_user({"email": "doomed@example.com", "persona": "Annotator"})
+            index.create_user(
+                {"email": "doomed@example.com", "persona": "Annotator"}
+            )
 
         remaining = users_table.scan().get("Items", [])
         assert remaining == []
