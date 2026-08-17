@@ -4902,6 +4902,14 @@ Resources:
               - FilesCount
               - Status
               - CompletedAt
+              # NOTE: do NOT add attributes here on an existing stack. DynamoDB
+              # rejects any GSI change other than throughput/Contributor Insights
+              # with "Cannot update GSI's properties other than Provisioned
+              # Throughput", which fails the whole stack update. Submission
+              # provenance is therefore carried by the ItemType *key* rather than a
+              # projected attribute — see idp_common.dynamodb.service. (Same reason
+              # VersionCount is deliberately absent; see the Document type in
+              # schema.graphql.)
       TimeToLiveSpecification:
         AttributeName: ExpiresAfter
         Enabled: true
@@ -5042,8 +5050,12 @@ Resources:
       TrackingTableName: !Ref TrackingTable
       BackfillStateMachineArn: !Ref BackfillStateMachine
       TotalSegments: "10"
-      # Force re-evaluation on each stack update (bumped for ConfidenceAlertCount=0 repair)
-      BackfillVersion: "3.0"
+      # MUST be bumped by any change that needs the backfill to re-run.
+      # CloudFormation only sends an Update to a custom resource when one of its
+      # properties changes, so leaving this alone means the trigger is never
+      # invoked and the new backfill silently does not happen on upgrades.
+      # 4.0: retype pre-existing test-run documents to ItemType=test-document.
+      BackfillVersion: "4.0"
 
   ##############################################################################
   # DynamoDB table and initialization function for workflow concurrency counter
@@ -9199,12 +9211,24 @@ Resources:
       Precedence: 2
       UserPoolId: !Ref UserPool
 
+  AnnotatorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: >-
+        Ground-truth Annotators for Test Studio. Least-privilege: scoped by the
+        user's allowedTestSets to the test set(s) they were onboarded for, and
+        can only read and annotate those documents — not list other test sets,
+        run configurations, or publish versions.
+      GroupName: Annotator
+      Precedence: 3
+      UserPoolId: !Ref UserPool
+
   ViewerGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
       Description: Viewers - read-only access to documents and configuration
       GroupName: Viewer
-      Precedence: 3
+      Precedence: 4
       UserPoolId: !Ref UserPool
 
   AdminUserToGroupAttachment:
@@ -10818,6 +10842,7 @@ Resources:
           ADMIN_GROUP: !Ref AdminGroup
           AUTHOR_GROUP: !Ref AuthorGroup
           REVIEWER_GROUP: !Ref ReviewerGroup
+          ANNOTATOR_GROUP: !Ref AnnotatorGroup
           VIEWER_GROUP: !Ref ViewerGroup
           USERS_TABLE_NAME: !Ref UsersTable
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
@@ -10933,7 +10958,14 @@ Resources:
           OUTPUT_BUCKET: !Ref OutputBucket
           INPUT_BUCKET: !Ref InputBucket
           WORKING_BUCKET: !Ref WorkingBucket
+          # Test-set HITL: when a reviewed doc belongs to a test set, corrected
+          # labels are also written back to the test set's baseline so a later
+          # publishTestSetVersion captures the human annotations as ground truth.
+          TEST_SET_BUCKET: !Ref TestSetBucket
           QUEUE_URL: !Ref DocumentQueue
+          # Annotator scope: review operations verify the document's test set is
+          # in the caller's allowedTestSets, which is stored on the user record.
+          USERS_TABLE_NAME: !Ref UsersTable
       LoggingConfig:
         LogGroup: !Ref CompleteSectionReviewFunctionLogGroup
       Policies:
@@ -10943,8 +10975,21 @@ Resources:
             BucketName: !Ref OutputBucket
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
+        - S3CrudPolicy:
+            BucketName: !Ref TestSetBucket
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
+        # Read-only on UsersTable + EmailIndex to resolve the caller's
+        # allowedTestSets. An Annotator whose scope cannot be resolved is denied,
+        # so a missing grant blocks annotation rather than widening access.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt UsersTable.Arn
+                - !Sub "${UsersTable.Arn}/index/*"
         - Statement:
             - Effect: Allow
               Action:

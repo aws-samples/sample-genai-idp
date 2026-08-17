@@ -80,10 +80,20 @@ FIELD_ALIASES: Dict[str, str] = {
     "addDocumentsToTestSetFromUpload": "addDocumentsToTestSet",
     "addTestSet": "addDocumentsToTestSet",
     "addTestSetFromUpload": "addDocumentsToTestSet",
+    "clearDraftLabels": "addDocumentsToTestSet",
     "deleteTestSets": "addDocumentsToTestSet",
+    "estimateReviewEffort": "addDocumentsToTestSet",
+    "getAnnotationQueue": "addDocumentsToTestSet",
+    "generateDraftLabels": "addDocumentsToTestSet",
+    "getDraftLabelJob": "addDocumentsToTestSet",
     "getTestSetDocuments": "addDocumentsToTestSet",
     "getTestSets": "addDocumentsToTestSet",
+    "getTestSetVersions": "addDocumentsToTestSet",
     "listBucketFiles": "addDocumentsToTestSet",
+    "publishTestSetVersion": "addDocumentsToTestSet",
+    "reextractTestSetDocument": "addDocumentsToTestSet",
+    "resetTestSetLabels": "addDocumentsToTestSet",
+    "removeDocumentsFromTestSet": "addDocumentsToTestSet",
     "updateTestSet": "addDocumentsToTestSet",
     "validateTestFileName": "addDocumentsToTestSet",
     # compareDocumentVersions (DocumentVersionsResolverFunction)
@@ -131,6 +141,8 @@ FIELD_ALIASES: Dict[str, str] = {
     "deleteFinetuningJob": "createFinetuningJob",
     "getFinetuningJob": "createFinetuningJob",
     "listFinetuningJobs": "createFinetuningJob",
+    # sendTestRunToReview (TestRunnerFunction)
+    "sendTestRunToReview": "startTestRun",
 }
 
 

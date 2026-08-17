@@ -26,6 +26,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 import FileViewer from '../document-viewer/JSONViewer';
 import { getSectionConfidenceAlertCount, getSectionConfidenceAlerts } from '../common/confidence-alerts-utils';
+import { getConfigClassOptions } from '../common/config-class-options';
 import { getSectionIssueStatus, type ProcessingIssue } from '../common/processing-issues-utils';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
@@ -965,26 +966,9 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
   }, [isEditMode, sections]);
 
   // Get available classes from the document's config version (passed in as
-  // `mergedConfig`). Each option surfaces the class description so users can
-  // pick the correct class without leaving the dropdown.
-  const getAvailableClasses = () => {
-    if (!configuration?.classes) return [];
-    return (configuration.classes as Record<string, unknown>[])
-      .map((cls: Record<string, unknown>) => {
-        // Support both JSON Schema and legacy formats
-        // JSON Schema: $id or x-aws-idp-document-type
-        // Legacy: name
-        const className = String(cls.$id || cls['x-aws-idp-document-type'] || cls.name || '');
-        const description = typeof cls.description === 'string' ? cls.description.trim() : '';
-
-        return {
-          label: className,
-          value: className,
-          description: description || undefined,
-        };
-      })
-      .filter((option) => option.value); // Remove any undefined entries
-  };
+  // `mergedConfig`). Shared with Test Studio's annotation editor, which offers
+  // the same correction against the same config.
+  const getAvailableClasses = () => getConfigClassOptions(configuration);
 
   // Generate next sequential section ID
   const getNextSectionId = () => {

@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 logger = logging.getLogger(__name__)
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -81,6 +82,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             f"avg_weighted_score={avg_weighted_score_str}"
         )
 
+        _record_confidence_curve(test_run_id, tracking_table_name, result)
+
         return {"statusCode": 200, "body": json.dumps(result)}
 
     except Exception as e:
@@ -89,6 +92,128 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "statusCode": 500,
             "body": json.dumps({"error": str(e), "metrics": _empty_metrics()}),
         }
+
+
+def _drafting_config_versions(table, test_set_id: str, exclude_run_id: str) -> set:
+    """Config versions that produced any of this set's draft labels.
+
+    Labeling-job items are per-run (SK ``labeljob#{runId}``) and the job id *is* a
+    test run id, so each one's run record carries the version the runner resolved —
+    no extra field to keep in sync. Returns an empty set if the jobs cannot be read,
+    which makes the caller's guard fail *open*: a curve that misses a refusal is
+    recoverable (reset and rebuild), whereas dropping every observation on a
+    transient read error would silently stop the estimator from ever measuring.
+    """
+    versions = set()
+    try:
+        start_key = None
+        for _ in range(20):
+            kwargs = {
+                "KeyConditionExpression": Key("PK").eq(f"testset#{test_set_id}")
+                & Key("SK").begins_with("labeljob#"),
+            }
+            if start_key:
+                kwargs["ExclusiveStartKey"] = start_key
+            page = table.query(**kwargs)
+            for job in page.get("Items") or []:
+                run_id = job.get("jobId")
+                if not run_id or run_id == exclude_run_id:
+                    continue
+                version = (
+                    table.get_item(
+                        Key={"PK": f"testrun#{run_id}", "SK": "metadata"}
+                    ).get("Item")
+                    or {}
+                ).get("ConfigVersion")
+                if version:
+                    versions.add(version)
+            start_key = page.get("LastEvaluatedKey")
+            if not start_key:
+                break
+    except Exception as e:  # noqa: BLE001 — see docstring: guard fails open
+        logger.warning(f"Could not resolve drafting configs for {test_set_id}: {e}")
+    return versions
+
+
+def _record_confidence_curve(
+    test_run_id: str, tracking_table_name: str, result: Dict[str, Any]
+) -> None:
+    """Fold this scoring run's calibration into the test set's confidence curve.
+
+    A scoring run is the highest-fidelity source the review-effort estimator has:
+    it measures correctness across the *whole* confidence range, including the
+    high-confidence zone that worst-first human review never reaches. Only after
+    such a run can the estimate honestly report itself as "measured".
+
+    The ECE bins computed above already are the reliability table the curve
+    stores, so this reuses them rather than recomputing anything.
+
+    Best-effort: the curve is an optimization for a different feature, and
+    failing to update it must not fail the aggregation the dashboard depends on.
+    """
+    try:
+        bins = (
+            ((result or {}).get("confidence_metrics") or {})
+            .get("overall", {})
+            .get("ece", {})
+            .get("bins")
+        )
+        if not bins:
+            logger.info(
+                "No ECE bins in aggregation result; skipping confidence-curve update"
+            )
+            return
+
+        table = dynamodb.Table(tracking_table_name)
+        run = (
+            table.get_item(Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"}).get(
+                "Item"
+            )
+            or {}
+        )
+        test_set_id = run.get("TestSetId")
+        if not test_set_id:
+            return  # Not a test-set run — nothing to attribute the curve to.
+
+        # A run scored against labels the same config drafted measures the config
+        # against itself: extraction reproduces the drafted baseline almost exactly,
+        # the bins fold in as near-perfect accuracy, and the set can report "99%
+        # accuracy, measured on this test set" for labels no human ever checked.
+        # That is precisely the false confidence the quality tiers exist to prevent,
+        # so these observations are refused rather than recorded.
+        run_config = run.get("ConfigVersion")
+        test_set = (
+            table.get_item(Key={"PK": f"testset#{test_set_id}", "SK": "metadata"}).get(
+                "Item"
+            )
+            or {}
+        )
+        # Every labeling job, not just the set's current pointer: a one-document
+        # re-extract repoints it, so reading only the newest job would let a run
+        # score the config that drafted the *other* 199 documents.
+        drafted_by = _drafting_config_versions(table, test_set_id, test_run_id)
+        if test_set.get("labelState") == "draft" and run_config in drafted_by:
+            logger.info(
+                f"Skipping confidence-curve update for {test_set_id}: run scored "
+                f"config '{run_config}' against labels that config drafted, which "
+                "would measure the config against itself"
+            )
+            return
+
+        from idp_common.evaluation.curve_store import CurveStore
+
+        accepted = CurveStore(table).add_ece_bins(
+            test_set_id, bins, config_version=run_config
+        )
+        logger.info(
+            f"Recorded {accepted} confidence-curve observation(s) for test set "
+            f"{test_set_id} from scoring run {test_run_id}"
+        )
+    except Exception as e:  # noqa: BLE001 — must not fail aggregation
+        logger.warning(
+            f"Could not update confidence curve for test run {test_run_id}: {e}",
+            exc_info=True,
+        )
 
 
 def aggregate_test_run_with_stickler(

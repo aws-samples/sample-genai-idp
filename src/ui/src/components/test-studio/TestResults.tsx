@@ -47,6 +47,7 @@ import {
   parseTestRunConfig,
 } from '../../graphql/awsjson-parsers';
 import type { GradedPacketMetrics } from '../../graphql/awsjson-types';
+import type { TestRunInput } from '../../graphql/generated/schema-types';
 import type { SelectProps } from '@cloudscape-design/components';
 
 const client = generateClient();
@@ -1197,7 +1198,11 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
     setReRunLoading(true);
 
     try {
-      const input: { testSetId: string; context?: string; numberOfFiles?: number; configVersion?: string } = {
+      // Use the generated input type rather than a hand-written structural copy:
+      // a locally-declared shape stops matching whenever the schema gains a
+      // field, and the mismatch surfaces as `startTestRun does not exist on
+      // type {}` at the call site rather than as an error here.
+      const input: TestRunInput = {
         testSetId: testSetId as string,
         ...(reRunContext && { context: reRunContext }),
         ...(reRunNumberOfFiles.trim() && { numberOfFiles: parseInt(reRunNumberOfFiles.trim(), 10) }),
