@@ -3,6 +3,12 @@ SPDX-License-Identifier: MIT-0
 
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Test Studio scored no-op documents as `0.000`, dragging the run-level Average Weighted Overall Score toward zero.** Sections whose class has no extractable schema (class not in config, or class with zero attributes) landed in `evaluate_section`'s failure branch and emitted `weighted_overall_score: 0.0`, producing a spurious `0.0–0.1` histogram spike and `0.000` rows in "Documents with Lowest Weighted Overall Scores". Detection now happens before Stickler runs and returns `evaluation_skipped=True` / `weighted_overall_score=None`; the document aggregator drops those sections from the weighted mean and confusion-matrix rollup, folds them into `DocumentEvaluationResult.excluded_sections` (so the markdown "Excluded Sections" table covers them alongside `x-aws-idp-exclude-from-processing`), and the aggregation Lambda already omits `None` from `weighted_overall_scores`, so the histogram / lowest-scores UI exclude them automatically. The excluded count is surfaced end-to-end: aggregator emits `excluded_document_count` / `excluded_documents`, resolver writes them to the `TestRun` cache, GraphQL exposes `excludedDocumentCount: Int` (existing cached runs trip the staleness guard once and re-aggregate). Test Studio gains an **"Excluded Docs"** KPI tile in the top-of-page row, sitting alongside Overall Accuracy / Avg Weighted Score / Duration, with an info icon that explains why those docs weren't scored. Hidden when nothing is excluded so the happy-path KPI row stays lean.
+
 ## [0.6.4]
 
 ### Added

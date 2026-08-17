@@ -1683,6 +1683,7 @@ export type TestRun = {
   context?: Maybe<Scalars['String']['output']>;
   costBreakdown?: Maybe<Scalars['AWSJSON']['output']>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  excludedDocumentCount?: Maybe<Scalars['Int']['output']>;
   failedFiles?: Maybe<Scalars['Int']['output']>;
   fieldMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   filesCount: Scalars['Int']['output'];
