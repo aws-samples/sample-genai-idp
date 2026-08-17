@@ -173,7 +173,7 @@ class TestAggregation:
             with patch.object(index, "_load_s3_json") as mock_load_s3:
                 mock_load_s3.return_value = mock_s3_results
 
-                results, scores, graded = index._load_comparison_results(
+                results, scores, graded, excluded = index._load_comparison_results(
                     "test-run-123", "test-table"
                 )
 
@@ -184,6 +184,8 @@ class TestAggregation:
                 assert scores["doc1.pdf"] == 0.95
                 # No doc_split_metrics in this fixture → empty graded map.
                 assert graded == {}
+                # No no-op sections in this fixture → empty excluded list.
+                assert excluded == []
 
     def test_load_comparison_results_skips_incomplete(self, mock_env):
         """Test that incomplete evaluations are skipped."""
@@ -204,13 +206,14 @@ class TestAggregation:
         with patch.object(index, "dynamodb") as mock_dynamodb:
             mock_dynamodb.Table.return_value = incomplete_table
 
-            results, scores, graded = index._load_comparison_results(
+            results, scores, graded, excluded = index._load_comparison_results(
                 "test-run-123", "test-table"
             )
 
             assert len(results) == 0
             assert len(scores) == 0
             assert graded == {}
+            assert excluded == []
 
     def test_empty_metrics(self, mock_env):
         """Test empty metrics structure."""
@@ -227,6 +230,10 @@ class TestAggregation:
         # resolver's DynamoDB write never misses the key (the stale-cache
         # guard in test_results_resolver keys on its presence).
         assert metrics["graded_packet_metrics"] == {}
+        # excluded_documents / excluded_document_count follow the same idiom
+        # so the UI never has to distinguish "field absent" from "0 excluded".
+        assert metrics["excluded_documents"] == []
+        assert metrics["excluded_document_count"] == 0
 
     def test_calculate_false_alarm_rate(self, mock_env):
         """Test false alarm rate calculation.
@@ -357,6 +364,76 @@ class TestAggregation:
         assert "rand_index" not in result["mean"]
         assert "avg_ordering_score" not in result["mean"]
 
+    def test_load_comparison_results_flags_docs_with_null_weighted_score(
+        self, mock_env
+    ):
+        """Docs whose sections are all no-ops emit ``weighted_overall_score: None``.
+
+        The aggregator must (a) exclude those docs from ``doc_weighted_scores``
+        so the UI histogram + lowest-scores tables don't render a synthetic
+        0.0 bar, and (b) still surface them via ``excluded_doc_keys`` so a
+        follow-up UI change can render an "N excluded" tile.
+        """
+        index = import_test_module()
+
+        table = MagicMock()
+        table.scan.return_value = {
+            "Items": [
+                {
+                    "PK": "doc#test-run-123#scored.pdf",
+                    "ObjectKey": "scored.pdf",
+                    "EvaluationStatus": "COMPLETED",
+                },
+                {
+                    "PK": "doc#test-run-123#noop.pdf",
+                    "ObjectKey": "noop.pdf",
+                    "EvaluationStatus": "COMPLETED",
+                },
+            ]
+        }
+
+        def fake_load(uri):
+            if "scored.pdf" in uri:
+                return {
+                    "overall_metrics": {"weighted_overall_score": 0.9},
+                    "section_results": [
+                        {"section_id": "1", "stickler_comparison_result": {"tp": 1}}
+                    ],
+                }
+            return {
+                "overall_metrics": {
+                    "weighted_overall_score": None,
+                    "evaluation_excluded": True,
+                    "exclusion_reason": "no_extractable_schema",
+                },
+                "section_results": [
+                    {
+                        "section_id": "1",
+                        # Excluded sections carry no stickler_comparison_result;
+                        # the metrics dict flags them evaluation_skipped.
+                        "metrics": {
+                            "evaluation_skipped": True,
+                            "weighted_overall_score": None,
+                        },
+                    }
+                ],
+            }
+
+        with patch.object(index, "dynamodb") as mock_dynamodb:
+            mock_dynamodb.Table.return_value = table
+            with patch.object(index, "_load_s3_json", side_effect=fake_load):
+                results, scores, _graded, excluded = index._load_comparison_results(
+                    "test-run-123", "test-table"
+                )
+
+        # Only the scored doc contributed a Stickler comparison result and a
+        # weighted score. The no-op doc is absent from ``doc_weighted_scores``
+        # and present in ``excluded_doc_keys``.
+        assert len(results) == 1
+        assert set(scores) == {"scored.pdf"}
+        assert scores["scored.pdf"] == 0.9
+        assert excluded == ["noop.pdf"]
+
     def test_load_comparison_results_reads_graded_packet_metrics(self, mock_env):
         """When ``doc_split_metrics`` is present in results.json, the graded
         packet fields flow into ``doc_graded_packet_scores`` keyed by doc.
@@ -396,7 +473,7 @@ class TestAggregation:
         with patch.object(index, "dynamodb") as mock_dynamodb:
             mock_dynamodb.Table.return_value = table
             with patch.object(index, "_load_s3_json", return_value=payload):
-                _, _, graded = index._load_comparison_results(
+                _, _, graded, _excluded = index._load_comparison_results(
                     "test-run-123", "test-table"
                 )
 

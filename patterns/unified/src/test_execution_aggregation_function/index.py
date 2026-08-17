@@ -230,9 +230,12 @@ def aggregate_test_run_with_stickler(
         Dictionary with aggregated metrics matching the existing format
     """
     # Load Stickler comparison results from S3
-    comparison_results, doc_weighted_scores, doc_graded_packet_scores = (
-        _load_comparison_results(test_run_id, tracking_table_name)
-    )
+    (
+        comparison_results,
+        doc_weighted_scores,
+        doc_graded_packet_scores,
+        excluded_doc_keys,
+    ) = _load_comparison_results(test_run_id, tracking_table_name)
 
     if not comparison_results:
         logger.warning(f"No comparison results found for test run: {test_run_id}")
@@ -245,6 +248,8 @@ def aggregate_test_run_with_stickler(
             empty["graded_packet_metrics"] = _aggregate_graded_packet_metrics(
                 doc_graded_packet_scores
             )
+        empty["excluded_documents"] = excluded_doc_keys
+        empty["excluded_document_count"] = len(excluded_doc_keys)
         return empty
 
     # Use Stickler's bulk aggregator
@@ -355,6 +360,8 @@ def aggregate_test_run_with_stickler(
         transformed["graded_packet_metrics"] = _aggregate_graded_packet_metrics(
             doc_graded_packet_scores
         )
+        transformed["excluded_documents"] = excluded_doc_keys
+        transformed["excluded_document_count"] = len(excluded_doc_keys)
         return transformed
 
     except Exception as e:
@@ -366,7 +373,12 @@ def aggregate_test_run_with_stickler(
 
 def _load_comparison_results(
     test_run_id: str, tracking_table_name: str
-) -> tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Dict[str, float]]]:
+) -> tuple[
+    List[Dict[str, Any]],
+    Dict[str, float],
+    Dict[str, Dict[str, float]],
+    List[str],
+]:
     """
     Load all Stickler comparison results for documents in a test run.
 
@@ -375,20 +387,24 @@ def _load_comparison_results(
         tracking_table_name: DynamoDB tracking table name
 
     Returns:
-        Tuple of (comparison_results, doc_weighted_scores, doc_graded_packet_scores).
+        Tuple of
+        ``(comparison_results, doc_weighted_scores, doc_graded_packet_scores, excluded_doc_keys)``.
         ``doc_graded_packet_scores`` maps doc_key → the graded packet metrics
         dict (``{final_score, clustering_score, v_measure, rand_index,
         avg_ordering_score}``) computed per document by
         ``compute_graded_packet_metrics``. Docs written before R14 landed —
         and docs whose gt/pred pages never overlap so ``evaluate_packet``
         can't produce scores — are absent from the map.
+        ``excluded_doc_keys`` lists documents whose every section was a
+        scoring no-op (class has no extractable schema); they contribute no
+        weighted score and are surfaced to the UI as an "excluded" count.
     """
     table = dynamodb.Table(tracking_table_name)
     output_bucket = os.environ.get("OUTPUT_BUCKET")
 
     if not output_bucket:
         logger.error("OUTPUT_BUCKET environment variable not set")
-        return [], {}, {}
+        return [], {}, {}, []
 
     # Scan for all documents matching the test run prefix
     comparison_results = []
@@ -477,11 +493,18 @@ def _load_comparison_results(
                 if stickler_result:
                     doc_comparisons.append(stickler_result)
 
-            # Extract weighted score
+            # Extract weighted score. Docs whose sections were all no-ops
+            # (no extractable schema for the class) emit ``None`` for the
+            # document-level weighted score; the aggregator surfaces those as
+            # ``excluded`` so the UI can show a count tile instead of a
+            # spurious 0.0 bar in the histogram.
             weighted_score = None
+            excluded_from_scoring = False
             if section_results:
-                weighted_score = eval_data.get("overall_metrics", {}).get(
-                    "weighted_overall_score"
+                overall_metrics = eval_data.get("overall_metrics", {}) or {}
+                weighted_score = overall_metrics.get("weighted_overall_score")
+                excluded_from_scoring = bool(
+                    overall_metrics.get("evaluation_excluded") or weighted_score is None
                 )
 
             # R14 graded packet metrics (V-measure / Rand / ordering) computed
@@ -503,6 +526,7 @@ def _load_comparison_results(
                 "doc_key": doc_key,
                 "comparisons": doc_comparisons,
                 "weighted_score": weighted_score,
+                "excluded_from_scoring": excluded_from_scoring,
                 "graded_scores": graded_scores,
                 "success": True,
             }
@@ -511,6 +535,8 @@ def _load_comparison_results(
                 f"Failed to load evaluation results from {eval_results_uri}: {e}"
             )
             return {"doc_key": doc_key, "success": False}
+
+    excluded_doc_keys: List[str] = []
 
     # Execute parallel S3 loads
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -525,6 +551,11 @@ def _load_comparison_results(
                 comparison_results.extend(result["comparisons"])
                 if result["weighted_score"] is not None:
                     doc_weighted_scores[result["doc_key"]] = result["weighted_score"]
+                elif result.get("excluded_from_scoring"):
+                    # Doc had section results but every one was a no-op — keep
+                    # it visible as "excluded" so the UI can distinguish this
+                    # from a load failure.
+                    excluded_doc_keys.append(result["doc_key"])
                 if result.get("graded_scores"):
                     doc_graded_packet_scores[result["doc_key"]] = result[
                         "graded_scores"
@@ -540,7 +571,17 @@ def _load_comparison_results(
         f"Loaded graded packet metrics for {len(doc_graded_packet_scores)} documents "
         f"for test run {test_run_id}"
     )
-    return comparison_results, doc_weighted_scores, doc_graded_packet_scores
+    if excluded_doc_keys:
+        logger.info(
+            f"{len(excluded_doc_keys)} document(s) excluded from scoring for test "
+            f"run {test_run_id} (no extractable schema for any section)"
+        )
+    return (
+        comparison_results,
+        doc_weighted_scores,
+        doc_graded_packet_scores,
+        excluded_doc_keys,
+    )
 
 
 def _load_s3_json(s3_uri: str) -> Dict[str, Any]:
@@ -888,7 +929,13 @@ def _rename_brier_score_key(
 
 
 def _empty_metrics() -> Dict[str, Any]:
-    """Return empty metrics structure."""
+    """Return empty metrics structure.
+
+    ``excluded_documents`` / ``excluded_document_count`` are seeded here (same
+    idiom as ``graded_packet_metrics``) so every return path emits the same
+    shape — the UI can distinguish "field absent" from "0 excluded" without a
+    presence check.
+    """
     return {
         "overall_accuracy": None,
         "weighted_overall_scores": {},
@@ -902,6 +949,8 @@ def _empty_metrics() -> Dict[str, Any]:
         },
         "split_classification_metrics": {},
         "graded_packet_metrics": {},
+        "excluded_documents": [],
+        "excluded_document_count": 0,
         "document_count": 0,
         "total_time": 0,
     }

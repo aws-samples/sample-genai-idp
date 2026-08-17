@@ -659,6 +659,13 @@ type TestRun @aws_cognito_user_pools @aws_iam {
   failedFiles: Int
   overallAccuracy: Float
   weightedOverallScores: AWSJSON
+  # Count of documents in this run whose sections all have no extractable
+  # schema (auto-detected no-op) — those docs are excluded from
+  # ``weightedOverallScores`` and from the histogram / lowest-scores UI.
+  # Surfaced so the UI can show "N excluded" next to the histogram instead
+  # of leaving the drop from filesCount to len(weightedOverallScores)
+  # unexplained.
+  excludedDocumentCount: Int
   averageConfidence: Float
   confidenceMetrics: AWSJSON
   accuracyBreakdown: AWSJSON
@@ -1471,7 +1478,7 @@ type Query @aws_cognito_user_pools @aws_iam {
     endDateTime: AWSDateTime
     limit: Int
     nextToken: String
-    # Which submissions to list. Test Studio / Auto Optimizer documents run through
+    # Which submissions to list. Test Studio documents run through
     # the same pipeline as uploads, so without this they are indistinguishable in
     # this list — on a dev stack 248 of 249 rows were test artifacts. An enum, not a
     # free string, because the two views are separate index partitions rather than a

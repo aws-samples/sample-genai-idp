@@ -20,7 +20,7 @@ from idp_common.models import Document, Page, ProcessingIssue, Section, Status
 logger = logging.getLogger(__name__)
 
 # TypeDateIndex hash-key values. A document submitted by a non-production caller
-# (Test Studio, Auto Optimizer) gets its own ItemType so it never appears in the
+# (currently only Test Studio) gets its own ItemType so it never appears in the
 # production Document List, while staying efficiently queryable on its own.
 ITEM_TYPE_DOCUMENT = "document"
 ITEM_TYPE_TEST_DOCUMENT = "test-document"

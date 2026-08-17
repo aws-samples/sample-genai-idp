@@ -412,20 +412,30 @@ class DocumentEvaluationResult:
             f"- **Precision**: {precision:.2f} | **Recall**: {recall:.2f} | **F1 Score**: {f1_indicator} {f1_score:.2f}"
         )
 
-        # Add weighted overall score if available
-        weighted_score = self.overall_metrics.get("weighted_overall_score", 0)
-        if weighted_score >= 0.9:
-            weighted_indicator = "🟢"
-        elif weighted_score >= 0.7:
-            weighted_indicator = "🟡"
-        elif weighted_score >= 0.5:
-            weighted_indicator = "🟠"
+        # Add weighted overall score if available. When every section was a
+        # scoring no-op (no extractable schema), the weighted score is None —
+        # render as "N/A — Excluded" instead of a misleading 0.0000. The
+        # ``None`` sentinel is authoritative: service.py sets
+        # ``evaluation_excluded`` iff the score is None.
+        weighted_score = self.overall_metrics.get("weighted_overall_score")
+        if weighted_score is None:
+            sections.append(
+                "- **Weighted Overall Score**: ⚪ N/A — Excluded "
+                "(no extractable schema for any section)"
+            )
         else:
-            weighted_indicator = "🔴"
+            if weighted_score >= 0.9:
+                weighted_indicator = "🟢"
+            elif weighted_score >= 0.7:
+                weighted_indicator = "🟡"
+            elif weighted_score >= 0.5:
+                weighted_indicator = "🟠"
+            else:
+                weighted_indicator = "🔴"
 
-        sections.append(
-            f"- **Weighted Overall Score**: {weighted_indicator} {weighted_score:.4f} (Stickler's field-weighted aggregate)"
-        )
+            sections.append(
+                f"- **Weighted Overall Score**: {weighted_indicator} {weighted_score:.4f} (Stickler's field-weighted aggregate)"
+            )
 
         sections.append("")
 
@@ -437,10 +447,12 @@ class DocumentEvaluationResult:
             sections.append("## Excluded Sections (Not Evaluated)")
             sections.append("")
             sections.append(
-                "The following sections were classified as an "
-                "`x-aws-idp-exclude-from-processing` class and were therefore "
-                "skipped during extraction/assessment/evaluation. They do "
-                "**not** contribute to the accuracy metrics above."
+                "The following sections were skipped during evaluation and do "
+                "**not** contribute to the accuracy metrics above. Sections are "
+                "excluded either because their class was marked "
+                "`x-aws-idp-exclude-from-processing: true` (whole-pipeline skip) "
+                "or because the class has no extractable attributes defined in "
+                "the evaluation schema (evaluation-only skip)."
             )
             sections.append("")
             sections.append("| Section | Classification | Exclusion Reason | Pages |")
@@ -502,12 +514,22 @@ class DocumentEvaluationResult:
             sections.append(doc_split_table)
             sections.append("")
 
-        # Add extraction metrics table
+        # Add extraction metrics table. ``overall_metrics`` can carry
+        # non-numeric entries — ``weighted_overall_score`` is None when every
+        # section was excluded, and companion flags like ``evaluation_excluded``
+        # / ``exclusion_reason`` / ``skipped_section_count`` document *why*.
+        # Render those as-is instead of trying to ``{value:.4f}`` them.
         sections.append("### Document Extraction Metrics")
         extraction_table = "| Metric | Value | Rating |\n| ------ | :----: | :----: |\n"
         for metric, value in self.overall_metrics.items():
-            indicator = get_rating_for_metric(metric, value)
-            extraction_table += f"| {metric} | {value:.4f} | {indicator} |\n"
+            if value is None:
+                extraction_table += f"| {metric} | N/A | ⚪ Excluded |\n"
+                continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                indicator = get_rating_for_metric(metric, value)
+                extraction_table += f"| {metric} | {value:.4f} | {indicator} |\n"
+            else:
+                extraction_table += f"| {metric} | {value} |  |\n"
         sections.append(extraction_table)
         sections.append("")
 

@@ -41,8 +41,9 @@ MAX_PAGE_SIZE = 200
 TYPE_DATE_INDEX = "TypeDateIndex"
 
 # TypeDateIndex hash-key values; must match idp_common.dynamodb.service. Documents
-# submitted by Test Studio or Auto Optimizer carry their own ItemType, so they never
-# appear in the production Document List.
+# submitted by Test Studio carry their own ItemType, so they never appear in the
+# production Document List. Auto Optimizer submissions are NOT tagged today — they
+# would need to stamp submission-source the way the test copier does.
 ITEM_TYPE_DOCUMENT = "document"
 ITEM_TYPE_TEST_DOCUMENT = "test-document"
 
@@ -149,7 +150,7 @@ def _item_type_for_view(view):
     """Which TypeDateIndex hash key to query for the requested view.
 
     PRODUCTION (the default) lists ordinary uploads; TEST lists documents submitted
-    by Test Studio or Auto Optimizer. The views are mutually exclusive by design;
+    by Test Studio. The views are mutually exclusive by design;
     there is no combined view.
 
     Selecting on the index key rather than filtering a projected attribute keeps

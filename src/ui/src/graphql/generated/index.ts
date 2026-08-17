@@ -804,6 +804,7 @@ export const getTestRun = /* GraphQL */ `
       failedFiles
       overallAccuracy
       weightedOverallScores
+      excludedDocumentCount
       averageConfidence
       confidenceMetrics
       accuracyBreakdown
