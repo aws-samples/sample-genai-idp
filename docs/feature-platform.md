@@ -44,14 +44,15 @@ parameter reverts to auto-subscribe.
 
 ## Two kinds of extensions
 
-| | **OSS extension** | **Marketplace extension** *(future)* |
+| | **OSS extension** | **Marketplace extension** |
 |---|---|---|
 | `source` | `oss` | `marketplace` |
-| Status | available today | framework only — none exist yet |
-| Example | `docs-by-status`, `sample-health-insurance-review` (the bundled samples) | — |
-| Where the template lives | the stack-owned **FeatureBucket** (copied from the artifacts bucket at deploy time) | a **private seller bucket** (GetObject-only, no public read) |
+| Example | `docs-by-status`, `sample-health-insurance-review` (the bundled samples) | `idp-auto-optimizer` (Auto Optimizer) |
+| Where the template lives | the artifacts bucket, under a version-free `<prefix>/extensions/<id>/` base | a **per-Region seller bucket**, under a version-free base — see [Region availability](#region-availability) |
+| Region-scoped? | no — published with the host | **yes** — one published copy per supported Region |
 | Subscribe step | none — installable directly | UI links to the AWS Marketplace listing; buyer subscribes there |
-| How `getFeatureLaunchUrl` produces the template URL | public S3 HTTPS URL of the FeatureBucket object | **presigned** GetObject URL for the seller-bucket object, minted **only after** `GetEntitlements` confirms an ACTIVE subscription |
+| How `getFeatureLaunchUrl` produces the template URL | bare public S3 HTTPS URL | bare public S3 HTTPS URL for the **Region's** bucket, looked up in the catalog's `regions` map (no presign) |
+| Install gate | none | advisory entitlement check on the Launch button; the real gate is the subscription + the extension's runtime check |
 
 ## Catalog & discovery
 
@@ -78,30 +79,85 @@ and seller buckets permit `GetObject` only, not `ListObjectsV2`).
   **Extensions → Browse catalog** only until installed — the bundled reference
   samples do this).
 
-The seller bucket is the one inherent post-deploy runtime dependency for
-marketplace features: `getFeatureLaunchUrl` must presign a `GetObject` against
-it (after the entitlement check) at the moment an entitled admin clicks
-"Launch". The seller bucket's own bucket policy must grant the host's
-feature-platform role `s3:GetObject`, and the host stack must list the seller
-bucket's object ARN in `SellerBucketObjectArns`.
+### Region availability
+
+Marketplace extensions are **Region-scoped**. `sam package` bakes an absolute,
+Region-specific `s3://bucket/key` `CodeUri` into the published template, and a
+Lambda's code bucket must live in the function's own Region — so each supported
+Region needs its own published copy. Catalog schema **1.1** therefore maps each
+Region to an *explicit* bucket + template key:
+
+```yaml
+regions:
+  us-west-2:    { sellerBucket: aws-ml-blog-us-west-2,    templateKey: artifacts/genai-idp-mp/extensions/idp-auto-optimizer/template.yaml }
+  us-east-1:    { sellerBucket: aws-ml-blog-us-east-1,    templateKey: … }
+  eu-central-1: { sellerBucket: aws-ml-blog-eu-central-1, templateKey: … }
+```
+
+`getFeatureLaunchUrl` **looks the caller's Region up** in that map and fails
+closed ("not available in `<region>`") when it's absent, and
+`listCatalogFeatures` reports `availableInRegion` / `availableRegions` so the UI
+shows that up front instead of a Subscribe button that dead-ends.
+
+> **The host never derives a bucket name** by concatenating a basename with the
+> Region. S3 bucket names are global and guessable, so a derived name in a Region
+> we don't publish to could resolve to a bucket somebody else owns — and the
+> customer would be handed a CloudFormation template we did not write. This is a
+> security property, not tidiness.
+
+`templateKey` is **version-free** and must stay that way: a version-bearing key
+goes stale the moment a customer runs a stack Update. Versioned artifacts live
+under `<base>/<version>/` and the feature stack self-locates them from the
+`FEATURE_VERSION` baked into its template at publish time.
+
+Marketplace artifacts are **public-read**, which is forced rather than chosen:
+the registered Quick Launch template URL is fetched by AWS Seller Ops during
+listing review and by CloudFormation in an arbitrary buyer account, and the
+Lambda code zips are fetched from the buyer's account at deploy time. There is
+therefore **no presign** — it could only ever have covered the template, while
+its expiry broke long-running CFN "Update stack" sessions. The commercial gate is
+the Marketplace subscription plus the extension's own runtime entitlement check;
+the host's entitlement check on the Launch button is an **advisory UX gate**.
 
 ### "Update available" badges
 
-The "Update available" badge an installed extension shows in the **Extensions**
-nav compares the version recorded in the `InstalledFeatures` table against the
-catalog's `latestVersion` for that feature — both read with a single `GetObject`
-of `catalog.json`, no bucket listing. So an update is detected whenever a newer
-catalog ships, which for **OSS extensions** happens on the next host stack
-update (the catalog is re-copied into ConfigurationBucket).
+The badge compares the version in the `InstalledFeatures` table against the
+extension's **live** `latestVersion`, resolved in this order:
 
-> **Marketplace limitation (current).** Because the catalog is refreshed only on
-> a host stack create/update, a new *marketplace* extension version published to
-> a seller bucket is **not** surfaced as "Update available" until the host stack
-> is updated with a re-published catalog carrying the new `latestVersion`. The
-> host does not poll seller buckets at runtime (it can't — `GetObject` only, no
-> listing, and no version index). Live marketplace update detection is deferred;
-> for now, bump `latestVersion` in `config_library/extensions-marketplace.yaml`
-> and re-publish to advertise a new marketplace version.
+1. **`<base>/latest.json`, read at runtime.** The extension publisher rewrites
+   this object on every release (`{featureId, version, displayName,
+   bundleSha256, publishedAt}`), so a new extension version reaches customers
+   **without re-releasing the accelerator and without a stack update**. This
+   applies to OSS and marketplace extensions alike.
+2. **The catalog's `latestVersion`** — the fallback, used when `latest.json`
+   isn't reachable.
+
+The runtime read is designed to be invisible when it fails, because it runs on
+every page load:
+
+- **Fail soft** — unreachable object, bad JSON, blocked egress, or an
+  unpublished Region all fall back to the catalog value and ultimately to no
+  badge. It never surfaces an error.
+- **Cached** — memoized per (bucket, key) for `LATEST_JSON_TTL_SECONDS`
+  (default 300s); failures are cached for a shorter negative TTL so a missing
+  object doesn't cost a round trip every time. Set `LATEST_JSON_LOOKUP=false` to
+  disable the lookup and use the catalog only.
+- **Anonymous first** — the GET is unsigned, since published artifacts are
+  public-read. That needs no IAM grant on the host role and no bucket-policy
+  grant from the publisher, so enabling it cannot regress an existing
+  deployment. If public read is refused the host retries *signed*, which lets an
+  OSS extension self-published to a private bucket still get badges — list that
+  bucket's object ARN in `SellerBucketObjectArns` to allow it.
+
+Comparison is proper SemVer, and a badge appears only when the published version
+is strictly **newer**. A feature installed with `idp-feature-cli deploy
+--from-code` can legitimately be *ahead* of what's published; treating "differs"
+as "update available" would invite a downgrade.
+
+Consequently `latestVersion` in `config_library/extensions-marketplace.yaml` is
+only a seed/fallback. Keeping it roughly current is still useful — it's what a
+stack sees when `latest.json` is unreachable — but shipping an extension release
+no longer requires touching this repo.
 
 The separate Build Info **"update available"** indicator for the *accelerator
 itself* works differently: `idp-cli publish` writes a small pointer object,

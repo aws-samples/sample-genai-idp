@@ -217,13 +217,15 @@ Parameters:
   SellerBucketObjectArns:
     Type: CommaDelimitedList
     Default: ''
-    Description: (Optional) Object-level S3 ARNs (each ending in /*) of private
-      AWS Marketplace seller buckets that hold closed-source feature templates,
-      e.g. the S3 object ARN of idp-seller-prod with a /* suffix.
-      getFeatureLaunchUrl presigns GetObject against these (after an entitlement
-      check) so the CFN console can fetch the template. Each seller bucket's own
-      bucket policy must also grant this stack's role s3:GetObject. Leave blank
-      for OSS-only stacks.
+    Description: (Optional) Object-level S3 ARNs (each ending in /*) of PRIVATE
+      extension artifact buckets, e.g. an OSS extension self-published to your
+      own bucket. Grants this stack's role s3:GetObject so
+      listInstalledFeatures can fall back to a SIGNED read of latest.json for
+      "Update available" badges when the anonymous read is refused. Leave blank
+      for the normal case: published extension artifacts are public-read, so the
+      unsigned read works and no grant is needed. Not required for launching a
+      Marketplace extension — its template URL is a bare public S3 URL (there is
+      no presign; see the getFeatureLaunchUrl module docstring).
 
   LogLevel:
     Type: String
@@ -331,14 +333,16 @@ Resources:
           - !Ref AWS::NoValue
         - !If
           - HasSellerBuckets
-          - PolicyName: SellerBucketPresign
+          - PolicyName: PrivateExtensionArtifactRead
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
-                # GetObject on private Marketplace seller buckets so
-                # get_feature_launch_url can presign the closed-source template
-                # for an entitled admin. The seller bucket's own bucket policy
-                # must also grant this role. GetObject-only — no ListBucket.
+                # GetObject on PRIVATE extension artifact buckets, so
+                # list_installed_features can fall back to a signed read of
+                # latest.json when the anonymous read is refused. Only needed for
+                # a self-published private bucket; published artifacts are
+                # public-read. The bucket's own policy must also grant this role.
+                # GetObject-only — no ListBucket.
                 - Effect: Allow
                   Action: s3:GetObject
                   Resource: !Ref SellerBucketObjectArns
