@@ -42,6 +42,20 @@ export interface CatalogFeature {
   productCode: string | null;
   /** Marketplace-only: public listing page the Subscribe CTA links to. */
   marketplaceListingUrl: string | null;
+  /**
+   * Whether this feature can be installed in the host stack's own region.
+   * Marketplace extensions are region-scoped: `sam package` bakes an absolute,
+   * region-specific s3:// CodeUri into the published template, and a Lambda's
+   * code bucket must live in the function's region. When false, show where it
+   * IS available instead of a Subscribe button that dead-ends.
+   * Always true for OSS features; null/absent from an older host → treat as true.
+   */
+  availableInRegion: boolean | null;
+  /**
+   * Regions this feature publishes artifacts to. Empty for OSS features (they
+   * ship with the host, so they aren't region-scoped).
+   */
+  availableRegions: string[] | null;
 }
 
 export interface InstalledFeature {
