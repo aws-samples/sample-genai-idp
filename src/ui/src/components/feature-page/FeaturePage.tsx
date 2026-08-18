@@ -292,8 +292,7 @@ const FeaturePage: React.FC<FeaturePageProps> = ({ featureIdOverride, groups, ma
   // buyer's Marketplace console, so don't offer a button that would fail — and
   // never offer it for an `advisory` state, where we never confirmed a
   // subscription in the first place.
-  const canCancelSubscription =
-    isAdmin && (entitlement?.source === 'simulator' || entitlement?.source === 'marketplace');
+  const canCancelSubscription = isAdmin && (entitlement?.source === 'simulator' || entitlement?.source === 'marketplace');
 
   // --- ACTIVE + installed --------------------------------------------------
   // Trust the server's `updateAvailable`, which compares SemVer properly and
