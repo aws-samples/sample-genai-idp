@@ -957,6 +957,21 @@ Parameters:
       a running stack with no rebuild; deploy the standalone simulator from
       the feature-extensions distribution and point this at its endpoint.
 
+  FeaturePlatformSubscriptionMode:
+    Type: String
+    Default: 'marketplace-live'
+    AllowedValues: ['marketplace-live', 'auto']
+    Description: >-
+      How the host checks AWS Marketplace subscriptions for paid extensions when
+      no simulator endpoint is configured. 'marketplace-live' (default) queries
+      the real, buyer-side AWS Marketplace Agreement API (SearchAgreements) for
+      an active agreement on the extension's product. 'auto' skips the check and
+      treats every catalog extension as subscribed. Either way, OSS extensions
+      install directly and each paid extension enforces its own runtime
+      entitlement check — this host-side check is advisory, and it deliberately
+      degrades to allow (not deny) if the API is unreachable, so a permissions
+      gap can't lock a paying customer out of an extension they bought.
+
   FeaturePlatformDefaultCustomerIdentifier:
     Type: String
     Default: ''
@@ -1370,6 +1385,7 @@ Metadata:
         Parameters:
           - EnableFeaturePlatform
           - FeaturePlatformSimulatorEndpoint
+          - FeaturePlatformSubscriptionMode
           - FeaturePlatformDefaultCustomerIdentifier
           - DefaultFeatureId
           - ConsoleTitle
@@ -1389,6 +1405,8 @@ Metadata:
         default: "Enable Feature Platform"
       FeaturePlatformSimulatorEndpoint:
         default: "Marketplace/Simulator Endpoint (optional — auto-subscribe if blank)"
+      FeaturePlatformSubscriptionMode:
+        default: "Marketplace Subscription Check (live Agreement API, or skip)"
       FeaturePlatformDefaultCustomerIdentifier:
         default: "Marketplace Customer Identifier (optional)"
       DefaultFeatureId:
@@ -2941,12 +2959,14 @@ Resources:
         # mode (the Lambda short-circuits to ACTIVE). Set it to a simulator or
         # real Marketplace endpoint to enable entitlement checks.
         SimulatorEntitlementEndpoint: !Ref FeaturePlatformSimulatorEndpoint
-        # 'auto' short-circuits the entitlement Lambda to ACTIVE for every
-        # feature (no endpoint, no Marketplace call). 'marketplace' targets a
-        # real or admin-supplied Marketplace/simulator endpoint.
+        # With a simulator/override endpoint set, target it ('marketplace').
+        # Without one, use FeaturePlatformSubscriptionMode: 'marketplace-live'
+        # (default) runs the real buyer-side AWS Marketplace Agreement check;
+        # 'auto' short-circuits every feature to ACTIVE and makes no Marketplace
+        # call at all.
         SubscriptionMode: !If
           - IsAutoSubscribeMode
-          - 'auto'
+          - !Ref FeaturePlatformSubscriptionMode
           - 'marketplace'
         DefaultCustomerIdentifier: !Ref FeaturePlatformDefaultCustomerIdentifier
         AdminGroupName: 'Admin'

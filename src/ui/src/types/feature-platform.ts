@@ -81,7 +81,17 @@ export interface FeatureEntitlement {
   expiresAt: string | null;
   customerIdentifier: string | null;
   productCode: string | null;
-  source: 'marketplace' | 'simulator' | 'auto' | 'none';
+  /**
+   * Which mechanism produced this state:
+   * - `marketplace` — GetEntitlements via a configured endpoint (simulator or override)
+   * - `simulator` — the local marketplace-simulator
+   * - `marketplace-live` — the real buyer-side AWS Marketplace Agreement API
+   * - `advisory` — the live check was UNREACHABLE, so ACTIVE was assumed rather
+   *   than locking a possibly-paying customer out. Not a confirmed subscription.
+   * - `auto` — entitlement checks disabled; everything treated as subscribed
+   * - `oss` / `none` — open-source feature, or no product code registered
+   */
+  source: 'marketplace' | 'marketplace-live' | 'advisory' | 'simulator' | 'auto' | 'oss' | 'none';
   /**
    * URL the UI must redirect the admin to (new tab) in order to accept
    * pricing, EULA, and the AWS Customer Agreement. Populated only by the
