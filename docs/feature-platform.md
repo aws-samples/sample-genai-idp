@@ -119,6 +119,60 @@ its expiry broke long-running CFN "Update stack" sessions. The commercial gate i
 the Marketplace subscription plus the extension's own runtime entitlement check;
 the host's entitlement check on the Launch button is an **advisory UX gate**.
 
+### Subscription checks for paid extensions
+
+Set by `FeaturePlatformSubscriptionMode` (only consulted when no simulator
+endpoint is configured):
+
+| Mode | What it does |
+|---|---|
+| `marketplace-live` *(default)* | Queries the **buyer-side** AWS Marketplace Agreement API (`SearchAgreements`) for an ACTIVE `PurchaseAgreement` on the extension's `productId`. |
+| `auto` | Skips the check; every catalog extension is treated as subscribed. |
+
+**Why not `GetEntitlements`?** It's the obvious API and it does not work here —
+in the most misleading way possible. Called from a buyer account it returns HTTP
+200 with an *empty* list rather than an error, for two independent reasons:
+
+1. It's a **seller-side** API. AWS's SaaS guidance is that these calls "must be
+   signed by credentials from your AWS Marketplace Seller account".
+2. Entitlement records only exist for SaaS **Contract** products. A usage-based
+   SaaS *Subscription* meters instead and has no entitlements at all.
+
+A fail-closed gate on that would deny every legitimate customer while logging
+nothing — and would look perfectly healthy in CI against the simulator. AWS
+License Manager (`ListReceivedLicenses`) was also ruled out: it fails with
+`AccessDeniedException: Service role not found` until a service role is created
+in the buyer account, which we can't require of a customer.
+
+The three outcomes are deliberately distinct:
+
+| Outcome | State | Meaning |
+|---|---|---|
+| ACTIVE agreement found | `ACTIVE` (`source: marketplace-live`) | Subscribed. |
+| Call succeeded, nothing matched | `NONE` (`source: marketplace-live`) | Authoritative — `SearchAgreements` is scoped to the caller's own account. UI shows Subscribe. |
+| Call **errored** | `ACTIVE` (`source: advisory`) | Indistinguishable from "not subscribed", so we allow and log loudly. |
+
+That last row is the important one: failing closed on a permissions gap or an
+unsupported partition would lock a paying customer out of an extension they
+bought. Each paid extension performs its own runtime entitlement check, so a
+permissive host gate costs nothing while a restrictive one is a support incident.
+For the same reason, the host's check on the Launch button is **advisory**.
+
+> **Known false-negative.** If an AWS Organization holds the subscription in the
+> management account while the IDP stack runs in a member account,
+> `SearchAgreements` from the member account reports nothing. `NONE` therefore
+> routes to Subscribe rather than hard-blocking.
+
+To reproduce any of this against a live account:
+
+```bash
+scripts/marketplace/verify_entitlement.sh          # Auto Optimizer defaults
+scripts/marketplace/verify_entitlement.sh <productCode> <productId> [listingId]
+```
+
+It runs both APIs side by side with a positive control, so an empty result is
+distinguishable from a broken one.
+
 ### "Update available" badges
 
 The badge compares the version in the `InstalledFeatures` table against the
