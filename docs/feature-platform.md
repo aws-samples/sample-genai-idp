@@ -30,17 +30,33 @@ IDP web UI, with its own page backed by a UMD-loaded React bundle.
 
 ## Deployment modes
 
-| `FeaturePlatformSimulatorEndpoint` | `EnableFeaturePlatform` | Mode |
-|---|---|---|
-| (n/a) | `false` | Platform off — no platform resources are created. |
-| `''` (default) | `true` (default) | **Auto-subscribe** — extensions in the catalog are installable directly; the UI goes straight to the Install prompt. No entitlement calls. The only mode used today. |
-| `https://…` | `true` | **Marketplace** *(future)* — `checkFeatureEntitlement` calls the supplied simulator or real AWS Marketplace endpoint for entitlement state. Unused until paid extensions ship. |
+Two **independent** parameters: `FeaturePlatformSubscriptionMode` chooses *which*
+API answers "is this account subscribed?", and
+`FeaturePlatformSimulatorEndpoint` chooses *where* that call goes. They used to
+be coupled — the mode was inferred from whether an endpoint was set — which made
+the production path unreachable whenever a simulator was configured, so it could
+never be exercised in development.
 
-The marketplace simulator is **not** bundled with the open-source
-distribution. It is shipped separately and can be bolted onto a running stack
-with no rebuild: deploy the standalone simulator, then set
-`FeaturePlatformSimulatorEndpoint` on the main stack to its URL. Clearing the
-parameter reverts to auto-subscribe.
+| `FeaturePlatformSubscriptionMode` | API called | Notes |
+|---|---|---|
+| `marketplace-live` *(default)* | **Buyer-side** `marketplace-agreement:SearchAgreements` | The production path. See [Subscription checks](#subscription-checks-for-paid-extensions). |
+| `marketplace` | **Seller-side** `marketplace-entitlement:GetEntitlements` | Only meaningful against a simulator — the real API returns an empty list from a buyer account. |
+| `auto` | none | Every catalog extension is treated as subscribed; the UI goes straight to Install. |
+
+`EnableFeaturePlatform=false` removes the platform entirely (no resources
+created), regardless of the above.
+
+| `FeaturePlatformSimulatorEndpoint` | Effect |
+|---|---|
+| `''` *(default)* | Calls go to real AWS Marketplace. |
+| `https://…` | Base URL of a marketplace-simulator. Used for the buyer-console redirect **and** as the endpoint override for the emulated AWS APIs (`AWS_ENDPOINT_URL_MARKETPLACE_AGREEMENT` / `…_MARKETPLACE_ENTITLEMENT_SERVICE`), so a simulator can back either mode. |
+
+The marketplace simulator is **not** bundled with the open-source distribution.
+It is shipped separately and can be bolted onto a running stack with no rebuild.
+See [Simulator fidelity contract](feature-platform-developer-guide.md#simulator-fidelity-contract)
+for what a faithful simulator has to implement — in particular, a simulator that
+makes `GetEntitlements` *succeed* for a buyer-side caller reproduces the opposite
+of real behavior and will validate a design that fails silently in production.
 
 ## Two kinds of extensions
 

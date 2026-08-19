@@ -13,9 +13,14 @@ production-capable paths plus the dev simulator, selected by
     marketplace        pointed at `AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE`
                        (the local marketplace-simulator, or an admin-supplied
                        endpoint). UNCHANGED — this is the dev/CI path.
-    marketplace-live → the real, buyer-side AWS Marketplace **Agreement** API
-                       (`SearchAgreements`), with GetEntitlements as a secondary
-                       signal.
+    marketplace-live → the buyer-side AWS Marketplace **Agreement** API
+                       (`SearchAgreements`). Also simulatable: boto3 honors
+                       `AWS_ENDPOINT_URL_MARKETPLACE_AGREEMENT` (derived from the
+                       service model, same convention as the entitlement
+                       override), so a marketplace-simulator can back this path
+                       too. The mode is chosen independently of whether an
+                       endpoint is set — see docs/feature-platform.md
+                       "Deployment modes".
 
 Why `marketplace-live` doesn't just call GetEntitlements
 -------------------------------------------------------

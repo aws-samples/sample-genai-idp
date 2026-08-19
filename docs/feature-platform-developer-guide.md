@@ -542,12 +542,75 @@ to exercise the Subscribe → Install → Active flow without a real listing:
        --register-with-simulator <simulator-endpoint> \
        --simulator-product-code <product-code>
    ```
-3. Deploy the main stack with `EnableFeaturePlatform=true` and
-   `FeaturePlatformSimulatorEndpoint=<simulator-endpoint>`.
+3. Deploy the main stack with `EnableFeaturePlatform=true`,
+   `FeaturePlatformSimulatorEndpoint=<simulator-endpoint>`, and the
+   `FeaturePlatformSubscriptionMode` matching the API your simulator implements
+   (`marketplace-live` for `SearchAgreements`, `marketplace` for
+   `GetEntitlements`).
 4. Open the IDP web UI — your feature appears under **Extensions**.
 
-In the default **auto-subscribe** mode (no simulator endpoint) OSS features skip
-the subscription step entirely and go straight to **Install**.
+With `FeaturePlatformSubscriptionMode=auto` OSS features skip the subscription
+step entirely and go straight to **Install**.
+
+### Simulator fidelity contract
+
+The simulator's job is to fail the way AWS fails. Where it diverges, it doesn't
+just under-test — it *actively certifies* designs that break in production, and
+it does so in the silent direction: green in dev, silently denying every customer
+in prod.
+
+The canonical example, and the reason this section exists: a simulator that makes
+**`GetEntitlements` succeed for a buyer-side caller reproduces the opposite of
+real behavior.** Against real AWS, that call returns HTTP 200 with
+`{"Entitlements": []}` — never an error — because it is a seller-side API *and*
+because entitlement records exist only for SaaS **Contract** products (a
+usage-based SaaS Subscription has none). An entitlement gate built and "verified"
+against a generous simulator therefore denies every real customer while logging
+nothing.
+
+A faithful simulator should implement, in priority order:
+
+1. **Buyer-side `marketplace-agreement:SearchAgreements`** — the API the host
+   actually calls in production (`marketplace-live`). Response shape:
+   `agreementViewSummaries[].{agreementId, status, startTime, endTime,
+   proposalSummary.resources[].{id, type}, proposalSummary.offerId}` with
+   `status` in `ACTIVE | CANCELLED | …`. Point the host at it with
+   `AWS_ENDPOINT_URL_MARKETPLACE_AGREEMENT` (botocore derives that name from the
+   service model, so no client code is needed). Without this, `marketplace-live`
+   has no development coverage at all.
+2. **Filter-combination validation.** Real `SearchAgreements` rejects
+   unsupported combinations with `ValidationException` ("Provided combination of
+   filters is not supported"), which is a genuine failure mode worth reproducing.
+   The combination the host uses is `PartyType=Acceptor` +
+   `AgreementType=PurchaseAgreement` + `ResourceIdentifier=<productId>` +
+   `Status=ACTIVE`.
+3. **`ResourceIdentifier` keys on the product ENTITY id** (`prod-…`), not the
+   product code. A simulator that only models product codes cannot serve this
+   filter — which is why catalog schema 1.1 carries `productId` separately.
+4. **Pricing model on product registration.** `POST /admin/products` should
+   accept the pricing model (`FREE` / usage-based / contract) and offer terms,
+   because that is what determines whether entitlements exist at all.
+5. **Honest `GetEntitlements`.** Return 200-with-empty-list for a product
+   registered as usage-based/no-contract, and for any caller that is not the
+   registered seller account. This turns the simulator from a trap into a
+   teaching tool: a developer who builds a `GetEntitlements` gate sees it fail in
+   dev exactly as it would in prod.
+6. **Separate buyer and seller identities.** The structural fact behind all of
+   the above: seller-side APIs are signed by the seller account, buyer-side by
+   the buyer. Conflating them is what makes divergence 5 possible.
+7. *(Optional)* **Discovery API** — `GetListing` / `GetOffer` / `GetOfferTerms`.
+   This is how a developer confirms product identity and pricing model without
+   guessing, and it is cheap to stub.
+
+To check any of this against real AWS from a buyer account, read-only:
+
+```bash
+scripts/marketplace/verify_entitlement.sh <productCode> <productId> [listingId]
+```
+
+It runs the seller-side and buyer-side calls side by side with a positive
+control, so "empty because not subscribed" is distinguishable from "empty because
+the API can never answer this".
 
 ## Reference
 

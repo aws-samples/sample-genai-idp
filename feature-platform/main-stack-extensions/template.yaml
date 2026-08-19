@@ -516,6 +516,17 @@ Resources:
           DEFAULT_BUYER_ACCOUNT_ID: !Ref DefaultBuyerAccountId
           SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
           AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
+          # Endpoint override for the BUYER-side Agreement API used by
+          # SubscriptionMode=marketplace-live, so a marketplace-simulator can
+          # back that path too. botocore derives this variable name from the
+          # service model (serviceId "Marketplace Agreement"), the same
+          # convention the entitlement override above relies on — so pointing it
+          # at a simulator needs no client code. Blank = real AWS Marketplace.
+          #
+          # A simulator that does NOT implement SearchAgreements simply errors,
+          # which the resolver maps to UNKNOWN -> advisory ACTIVE with a loud
+          # log. That is a safe degradation, not a hard failure.
+          AWS_ENDPOINT_URL_MARKETPLACE_AGREEMENT: !Ref SimulatorEntitlementEndpoint
           # AWS Marketplace lives in us-east-1; the Agreement API used by
           # SubscriptionMode=marketplace-live is not available in every region.
           MARKETPLACE_AGREEMENT_REGION: !Ref MarketplaceAgreementRegion
